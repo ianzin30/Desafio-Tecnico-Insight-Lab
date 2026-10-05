@@ -13,4 +13,9 @@ matrix-sdk = "0.19.1"
 # Pinned exactly: must match the version of the Dart `flutter_rust_bridge`
 # package and the codegen used later.
 flutter_rust_bridge = "=2.13.0"
+thiserror = "2.0.21"
+url = "2.5.8"
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread"] }
 

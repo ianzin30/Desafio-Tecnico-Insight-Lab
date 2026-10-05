@@ -8,8 +8,16 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
 - `matrix-sdk` 0.19 is configured (default features: E2EE, SQLite stores, rustls).
 - `flutter_rust_bridge` 2.13.0 is declared (pinned; the Dart package must use the
   same version). No bridge API, codegen or Flutter project exists yet.
-- **No real Matrix functionality is implemented yet** — no client, homeserver
-  connection, login, session, rooms, messages or sync.
+- `MessengerCore::new(homeserver_url)` validates an `http(s)` homeserver URL and
+  builds the single Matrix `Client` owned by that core instance. Bare server
+  names (`matrix.org`) are rejected: `.well-known` discovery is not performed.
+- Building the client sends no request to the homeserver, and its state is kept
+  in memory only.
+- **Not implemented yet:** login, session persistence, rooms, messages, sync.
+
+```rust
+let core = messenger_core::MessengerCore::new("https://matrix.org").await?;
+```
 
 ## Requirements
 
