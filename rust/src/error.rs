@@ -39,6 +39,20 @@ pub enum CoreError {
     #[error("the stored session is invalid and was discarded")]
     InvalidSession(#[source] BoxError),
 
+    /// The operation requires an authenticated user.
+    #[error("no user is authenticated")]
+    NotAuthenticated,
+
+    /// The homeserver rejected the access token (e.g. revoked from another
+    /// device). The local session has been discarded: log in again.
+    #[error("the session is no longer valid on the homeserver")]
+    SessionRevoked,
+
+    /// Synchronization failed for a reason other than connectivity or an
+    /// invalid session (unexpected server response, ...).
+    #[error("synchronization with the homeserver failed")]
+    SyncFailed(#[source] BoxError),
+
     /// Reading or writing the data directory failed.
     #[error("failed to access the data directory")]
     Storage(#[source] BoxError),

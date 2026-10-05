@@ -14,7 +14,9 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
 - `login(username, password)` authenticates that client and persists the session;
   `restore_session()` resumes it after a restart; `logout()` ends it;
   `current_user()` returns the user ID read from the client.
-- **Not implemented yet:** rooms, messages, sync.
+- `refresh_rooms()` runs one finite `/sync` and returns the joined rooms;
+  `cached_rooms()` returns them from the local store without network.
+- **Not implemented yet:** messages/timeline, continuous sync, invites.
 
 ```rust
 use messenger_core::{MessengerCore, RestoreOutcome};
@@ -24,6 +26,8 @@ if core.restore_session().await? == RestoreOutcome::NoSession {
     core.login("alice", &password).await?;
 }
 assert_eq!(core.current_user().as_deref(), Some("@alice:matrix.org"));
+
+let rooms = core.refresh_rooms().await?; // Vec<RoomSummary { id, display_name, is_direct }>
 ```
 
 ## Session persistence
@@ -51,6 +55,36 @@ directory); the core hardcodes no platform path. Layout:
   session file and the store. If the homeserver is unreachable the local logout
   still happens and `LogoutOutcome::LocalOnly` is returned (the token may stay
   valid server-side).
+
+## Rooms
+
+- `refresh_rooms()` performs a single `/sync` (timeout 0: no long polling, no
+  background task). The Matrix SDK persists the received state in its SQLite
+  store, and the next sync resumes from the stored sync token. Rooms joined
+  later only show up on the next call.
+- `cached_rooms()` reads the store only: after `restore_session()` it returns
+  the rooms of the last sync (possibly outdated), empty if never synced.
+- Only **joined** rooms are listed: invites, left rooms and **spaces** (room
+  groups, not conversations) are excluded. Other room types are kept.
+- `display_name` comes from the SDK (spec algorithm: name, alias, then member
+  names, e.g. the other person in a DM, else `Empty Room`); `is_direct` reflects
+  the user's `m.direct` account data.
+- Rooms are sorted by room ID for determinism only — **not** by activity.
+- Errors: `NotAuthenticated` (no request sent), `HomeserverUnreachable`,
+  `SyncFailed`, and `SessionRevoked` when the homeserver rejects the token (e.g.
+  revoked elsewhere): the local session is then discarded and a new login is needed.
+- The sync uses a rooms-only filter: no timeline events (history stays
+  reachable later through pagination), lazy-loaded members (only those needed
+  to name rooms), no presence, no typing notifications. Room state and account
+  data are kept in full, since anything skipped would never be resent by later
+  incremental syncs.
+
+## Network policy
+
+Set once when the Matrix client is built (`messenger_core.rs`) and shared by
+all its requests: **5 s timeout per attempt, 2 attempts** (one retry ~0.5 s
+later). A homeserver that accepts connections but never answers fails in about
+10 s. Exception: login, whose retry config (3 attempts of 30 s) is fixed by the SDK.
 
 ## Requirements
 

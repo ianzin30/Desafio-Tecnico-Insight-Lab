@@ -1,7 +1,7 @@
 use std::path::Path;
+use std::time::Duration;
 
-use matrix_sdk::config::RequestConfig;
-use matrix_sdk::ruma::api::client::session::logout;
+use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::store::RoomLoadSettings;
 use matrix_sdk::{Client, HttpError};
@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::CoreError;
 use crate::homeserver::parse_homeserver_url;
+use crate::rooms::{RoomSummary, joined_room_summaries, rooms_sync_filter};
 use crate::storage::{Storage, StoredSession};
 
 /// Result of [`MessengerCore::restore_session`].
@@ -205,6 +206,63 @@ impl MessengerCore {
         self.client.user_id().map(ToString::to_string)
     }
 
+    /// Synchronizes once with the homeserver, then returns the joined
+    /// conversations (see [`RoomSummary`]).
+    ///
+    /// This is a single, finite `/sync` (no long polling, no background task);
+    /// the received state is persisted by the Matrix SDK in its store. Rooms
+    /// joined afterwards only appear on the next refresh.
+    ///
+    /// If the homeserver rejects the access token, the local session is
+    /// discarded and [`CoreError::SessionRevoked`] is returned.
+    pub async fn refresh_rooms(&mut self) -> Result<Vec<RoomSummary>, CoreError> {
+        self.require_authentication()?;
+
+        // Timeout zero: the server answers immediately instead of long polling
+        // for new events. The sync token stored by the SDK is reused, so each
+        // refresh continues from the previous one.
+        let settings = SyncSettings::new()
+            .timeout(Duration::ZERO)
+            .filter(rooms_sync_filter());
+        if let Err(err) = self.client.sync_once(settings).await {
+            return Err(self.handle_sync_error(err).await);
+        }
+        self.cached_rooms().await
+    }
+
+    /// Returns the joined conversations from the local store, without
+    /// contacting the homeserver: the state of the last sync, possibly
+    /// outdated (or empty if never synced).
+    pub async fn cached_rooms(&self) -> Result<Vec<RoomSummary>, CoreError> {
+        self.require_authentication()?;
+        joined_room_summaries(&self.client)
+            .await
+            .map_err(|err| CoreError::Storage(err.into()))
+    }
+
+    fn require_authentication(&self) -> Result<(), CoreError> {
+        match self.current_user() {
+            Some(_) => Ok(()),
+            None => Err(CoreError::NotAuthenticated),
+        }
+    }
+
+    async fn handle_sync_error(&mut self, err: matrix_sdk::Error) -> CoreError {
+        if matches!(
+            err.client_api_error_kind(),
+            Some(ErrorKind::UnknownToken(_))
+        ) {
+            return match self.discard_local_session().await {
+                Ok(()) => CoreError::SessionRevoked,
+                Err(discard_err) => discard_err,
+            };
+        }
+        if is_network_error(&err) {
+            return CoreError::HomeserverUnreachable(err.into());
+        }
+        CoreError::SyncFailed(err.into())
+    }
+
     fn persist_session(&self) -> Result<(), CoreError> {
         let session = self.client.matrix_auth().session().ok_or_else(|| {
             CoreError::AuthenticationFailed("no session after successful login".into())
@@ -216,14 +274,7 @@ impl MessengerCore {
     /// Asks the homeserver to invalidate the access token. Returns whether
     /// the token is known to be invalid server-side.
     async fn revoke_remote_session(&self) -> bool {
-        // Bounded retries: the SDK default retries network failures for
-        // minutes, which would block an offline logout.
-        let result = self
-            .client
-            .send(logout::v3::Request::new())
-            .with_request_config(RequestConfig::short_retry())
-            .await;
-        match result {
+        match self.client.matrix_auth().logout().await {
             Ok(_) => true,
             Err(err) => matches!(
                 err.client_api_error_kind(),
@@ -252,6 +303,16 @@ impl MessengerCore {
     }
 }
 
+/// Per-attempt timeout of every request (the SDK default is 30 s). Long
+/// enough for a filtered initial sync on a normal connection, short enough
+/// for an interactive desktop app.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Attempts per request, i.e. one retry (after ~0.5 s) for network failures
+/// and transient server errors. Without a limit the SDK does not retry
+/// network failures but retries transient server errors for up to 15 min.
+const REQUEST_ATTEMPTS: usize = 2;
+
 async fn build_client(
     homeserver: &Url,
     storage: &Storage,
@@ -261,6 +322,14 @@ async fn build_client(
         .homeserver_url(homeserver)
         // Keep the configured homeserver: a session is bound to it.
         .respect_login_well_known(false)
+        // Network policy shared by all requests of this client, so a hanging
+        // homeserver fails in ~10 s. Login is the exception: the SDK forces
+        // its own retry config there.
+        .request_config(
+            RequestConfig::new()
+                .timeout(REQUEST_TIMEOUT)
+                .retry_limit(REQUEST_ATTEMPTS),
+        )
         .sqlite_store(storage.store_path(store), None)
         .build()
         .await
@@ -275,13 +344,24 @@ fn map_login_error(err: matrix_sdk::Error) -> CoreError {
     if matches!(err.client_api_error_kind(), Some(ErrorKind::Forbidden)) {
         return CoreError::InvalidCredentials;
     }
-    if let matrix_sdk::Error::Http(http) = &err
-        && let HttpError::Reqwest(reqwest) = http.as_ref()
-        && (reqwest.is_connect() || reqwest.is_timeout())
-    {
+    if is_network_error(&err) {
         return CoreError::HomeserverUnreachable(err.into());
     }
     CoreError::AuthenticationFailed(err.into())
+}
+
+/// Connection failures and timeouts, as opposed to server responses.
+fn is_network_error(err: &matrix_sdk::Error) -> bool {
+    matches!(err, matrix_sdk::Error::Http(http) if is_network_http_error(http))
+}
+
+fn is_network_http_error(err: &HttpError) -> bool {
+    match err {
+        HttpError::Reqwest(err) => err.is_connect() || err.is_timeout(),
+        // Errors of cached requests (e.g. the server versions) are wrapped.
+        HttpError::Cached(err) => is_network_http_error(err),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -292,66 +372,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-
-    /// A local mock homeserver that advertises a supported spec version and
-    /// accepts logouts.
-    async fn mock_homeserver() -> MockServer {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/_matrix/client/versions"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "versions": ["v1.11"]
-            })))
-            .mount(&server)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/_matrix/client/v3/logout"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-            .mount(&server)
-            .await;
-        server
-    }
-
-    async fn mock_login_response(server: &MockServer, response: ResponseTemplate) {
-        Mock::given(method("POST"))
-            .and(path("/_matrix/client/v3/login"))
-            .respond_with(response)
-            .mount(server)
-            .await;
-    }
-
-    fn login_success(user_id: &str) -> ResponseTemplate {
-        ResponseTemplate::new(200).set_body_json(json!({
-            "user_id": user_id,
-            "access_token": "test-access-token",
-            "device_id": "TESTDEVICE"
-        }))
-    }
-
-    /// A mock homeserver accepting logins as `@alice:example.org`.
-    async fn alice_homeserver() -> MockServer {
-        let server = mock_homeserver().await;
-        mock_login_response(&server, login_success("@alice:example.org")).await;
-        server
-    }
-
-    async fn logged_in_core(server: &MockServer, data_dir: &TempDir) -> MessengerCore {
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
-        core.login("alice", "secret").await.unwrap();
-        core
-    }
-
-    fn session_file(data_dir: &TempDir) -> std::path::PathBuf {
-        data_dir.path().join("session.json")
-    }
-
-    fn store_count(data_dir: &TempDir) -> usize {
-        std::fs::read_dir(data_dir.path().join("stores"))
-            .unwrap()
-            .count()
-    }
+    use crate::test_support::*;
 
     #[tokio::test]
     async fn builds_client_for_homeserver() {
@@ -477,13 +498,7 @@ mod tests {
     async fn offline_logout_still_removes_the_local_session() {
         // Not pooled: the server really shuts down when dropped.
         let server = MockServer::builder().start().await;
-        Mock::given(method("GET"))
-            .and(path("/_matrix/client/versions"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "versions": ["v1.11"]
-            })))
-            .mount(&server)
-            .await;
+        mock_versions(&server).await;
         mock_login_response(&server, login_success("@alice:example.org")).await;
         let data_dir = TempDir::new().unwrap();
         let mut core = logged_in_core(&server, &data_dir).await;

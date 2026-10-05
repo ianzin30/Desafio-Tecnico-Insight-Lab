@@ -1,4 +1,4 @@
-//! Login, restore and logout against a real homeserver.
+//! Login, restore, room listing and logout against a real homeserver.
 //!
 //! Ignored by default: it needs network access and a real account, provided
 //! through environment variables (never commit credentials):
@@ -16,7 +16,7 @@ fn env(name: &str) -> String {
 
 #[tokio::test]
 #[ignore = "requires a real homeserver and MATRIX_* credentials"]
-async fn login_restore_and_logout_on_a_real_homeserver() {
+async fn session_and_rooms_on_a_real_homeserver() {
     let homeserver = env("MATRIX_HOMESERVER");
     let data_dir = tempfile::tempdir().expect("temporary data dir");
 
@@ -38,6 +38,12 @@ async fn login_restore_and_logout_on_a_real_homeserver() {
         RestoreOutcome::Restored
     );
     assert_eq!(core.current_user(), Some(user));
+
+    let rooms = core.refresh_rooms().await.expect("sync succeeds");
+    println!("{} joined room(s)", rooms.len());
+    for room in &rooms {
+        println!("- {} (direct: {})", room.display_name, room.is_direct);
+    }
 
     assert_eq!(
         core.logout().await.expect("logout succeeds"),
