@@ -10,6 +10,7 @@
 mod error;
 mod homeserver;
 mod messenger_core;
+mod storage;
 
 pub use error::CoreError;
-pub use messenger_core::MessengerCore;
+pub use messenger_core::{LogoutOutcome, MessengerCore, RestoreOutcome};

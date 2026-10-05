@@ -1,6 +1,6 @@
 use std::error::Error as StdError;
 
-type BoxError = Box<dyn StdError + Send + Sync>;
+pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// Errors exposed by the core.
 ///
@@ -32,4 +32,14 @@ pub enum CoreError {
     /// rate limiting, ...).
     #[error("authentication failed")]
     AuthenticationFailed(#[source] BoxError),
+
+    /// A persisted session exists but cannot be restored (corrupted file,
+    /// unknown format, other homeserver, unusable store, ...). It has been
+    /// discarded: the core is unauthenticated and ready for a new login.
+    #[error("the stored session is invalid and was discarded")]
+    InvalidSession(#[source] BoxError),
+
+    /// Reading or writing the data directory failed.
+    #[error("failed to access the data directory")]
+    Storage(#[source] BoxError),
 }
