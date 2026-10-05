@@ -1,0 +1,16 @@
+[package]
+name = "messenger_core"
+version = "0.1.0"
+edition = "2024"
+# Matches the MSRV declared by matrix-sdk 0.19.
+rust-version = "1.96"
+description = "Native Rust core of the desktop messaging client (Matrix integration)."
+publish = false
+
+[dependencies]
+# Default features: end-to-end encryption, SQLite stores and rustls TLS.
+matrix-sdk = "0.19.1"
+# Pinned exactly: must match the version of the Dart `flutter_rust_bridge`
+# package and the codegen used later.
+flutter_rust_bridge = "=2.13.0"
+
