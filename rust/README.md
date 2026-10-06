@@ -16,7 +16,9 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
   `current_user()` returns the user ID read from the client.
 - `refresh_rooms()` runs one finite `/sync` and returns the joined rooms;
   `cached_rooms()` returns them from the local store without network.
-- **Not implemented yet:** messages/timeline, continuous sync, invites.
+- `load_messages(room_id, limit)` returns the latest text messages of a joined
+  room; `send_text_message(room_id, body)` sends one.
+- **Not implemented yet:** continuous sync / realtime updates, media, invites.
 
 ```rust
 use messenger_core::{MessengerCore, RestoreOutcome};
@@ -28,6 +30,8 @@ if core.restore_session().await? == RestoreOutcome::NoSession {
 assert_eq!(core.current_user().as_deref(), Some("@alice:matrix.org"));
 
 let rooms = core.refresh_rooms().await?; // Vec<RoomSummary { id, display_name, is_direct }>
+let messages = core.load_messages(&rooms[0].id, 50).await?; // oldest first
+let sent = core.send_text_message(&rooms[0].id, "Olá!").await?; // SentMessage { event_id }
 ```
 
 ## Session persistence
@@ -79,6 +83,27 @@ directory); the core hardcodes no platform path. Layout:
   data are kept in full, since anything skipped would never be resent by later
   incremental syncs.
 
+## Messages
+
+- `load_messages(room_id, limit)` sends one `/messages` request backwards from
+  the end of the room timeline (no token needed, so it does not depend on the
+  rooms-only sync) for at most `limit` message events, capped at
+  `MAX_MESSAGES` (100). Results are ordered **oldest first**.
+- Only `m.room.message` events with `msgtype` `m.text` become a `Message`
+  (`id`, `sender`, `body`, `timestamp_ms`, `is_own`); media, edits, reactions,
+  state events and undecryptable events are skipped, so fewer than `limit`
+  messages may be returned.
+- Messages are not cached: each call queries the homeserver. The SDK event
+  cache was not enabled — it is fed by sync, which is limited to rooms until
+  continuous sync is implemented.
+- `send_text_message(room_id, body)` sends `m.room.message`/`m.text` with the
+  body unchanged (blank bodies are rejected without a request) and returns
+  the event ID. There is no local echo: the message appears on the next
+  `load_messages`.
+- Errors: `NotAuthenticated`, `RoomNotFound` (invalid or unknown room ID),
+  `NotJoined` (invited/left rooms), `InvalidMessage`, `MessageLoadFailed`,
+  `MessageSendFailed`, plus `HomeserverUnreachable` and `SessionRevoked` as for rooms.
+
 ## Network policy
 
 Set once when the Matrix client is built (`messenger_core.rs`) and shared by
@@ -117,5 +142,8 @@ Ignored by default. Credentials come from the environment only — never commit 
 
 ```bash
 MATRIX_HOMESERVER=https://matrix.org MATRIX_USERNAME=alice MATRIX_PASSWORD=... \
-    cargo test --test live_login -- --ignored
+    cargo test --test live_login -- --ignored --nocapture
 ```
+
+Add `MATRIX_TEST_ROOM_ID=!room:server` to also load that room's messages, and
+`MATRIX_TEST_SEND=1` (explicit opt-in) to send a test message to it.

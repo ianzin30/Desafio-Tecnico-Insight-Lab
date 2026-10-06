@@ -5,11 +5,12 @@
 //!
 //! [`MessengerCore`] is the entry point: it is created for a homeserver and
 //! owns the Matrix client used by all subsequent operations (authentication,
-//! session persistence, room listing). Messages and continuous sync are not
+//! session persistence, room listing, text messages). Continuous sync is not
 //! implemented yet.
 
 mod error;
 mod homeserver;
+mod messages;
 mod messenger_core;
 mod rooms;
 mod storage;
@@ -17,5 +18,6 @@ mod storage;
 mod test_support;
 
 pub use error::CoreError;
+pub use messages::{MAX_MESSAGES, Message, SentMessage};
 pub use messenger_core::{LogoutOutcome, MessengerCore, RestoreOutcome};
 pub use rooms::RoomSummary;

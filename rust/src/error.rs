@@ -53,6 +53,28 @@ pub enum CoreError {
     #[error("synchronization with the homeserver failed")]
     SyncFailed(#[source] BoxError),
 
+    /// The room ID is invalid or unknown to the client (refresh the rooms if
+    /// it was joined recently).
+    #[error("room not found")]
+    RoomNotFound,
+
+    /// The room is known but the user has not joined it (invited, left, ...).
+    #[error("the user has not joined this room")]
+    NotJoined,
+
+    /// The message body is empty or only whitespace.
+    #[error("the message is empty")]
+    InvalidMessage,
+
+    /// Loading messages failed (unexpected server response, ...).
+    #[error("failed to load messages")]
+    MessageLoadFailed(#[source] BoxError),
+
+    /// Sending the message failed (rejected by the server, encryption
+    /// failure, ...).
+    #[error("failed to send the message")]
+    MessageSendFailed(#[source] BoxError),
+
     /// Reading or writing the data directory failed.
     #[error("failed to access the data directory")]
     Storage(#[source] BoxError),

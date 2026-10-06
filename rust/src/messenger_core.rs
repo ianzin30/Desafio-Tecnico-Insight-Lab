@@ -2,13 +2,17 @@ use std::path::Path;
 use std::time::Duration;
 
 use matrix_sdk::config::{RequestConfig, SyncSettings};
+use matrix_sdk::ruma::RoomId;
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::store::RoomLoadSettings;
-use matrix_sdk::{Client, HttpError};
+use matrix_sdk::{Client, HttpError, Room, RoomState};
 use url::Url;
 
 use crate::CoreError;
+use crate::error::BoxError;
 use crate::homeserver::parse_homeserver_url;
+use crate::messages::{MAX_MESSAGES, Message, SentMessage, latest_messages_options, to_message};
 use crate::rooms::{RoomSummary, joined_room_summaries, rooms_sync_filter};
 use crate::storage::{Storage, StoredSession};
 
@@ -225,7 +229,7 @@ impl MessengerCore {
             .timeout(Duration::ZERO)
             .filter(rooms_sync_filter());
         if let Err(err) = self.client.sync_once(settings).await {
-            return Err(self.handle_sync_error(err).await);
+            return Err(self.handle_request_error(err, CoreError::SyncFailed).await);
         }
         self.cached_rooms().await
     }
@@ -240,14 +244,94 @@ impl MessengerCore {
             .map_err(|err| CoreError::Storage(err.into()))
     }
 
-    fn require_authentication(&self) -> Result<(), CoreError> {
-        match self.current_user() {
-            Some(_) => Ok(()),
-            None => Err(CoreError::NotAuthenticated),
+    /// Loads the latest text messages of a joined room from the homeserver,
+    /// ordered **oldest first** (the last one is the most recent).
+    ///
+    /// A single `/messages` request fetches the last `limit` message events
+    /// (capped at [`MAX_MESSAGES`]); only supported text messages are
+    /// returned (see [`Message`]), so the result may hold fewer than `limit`.
+    /// Nothing is cached: each call queries the homeserver.
+    pub async fn load_messages(
+        &mut self,
+        room_id: &str,
+        limit: u16,
+    ) -> Result<Vec<Message>, CoreError> {
+        let own_user_id = self.require_authentication()?;
+        let room = self.joined_room(room_id)?;
+        let limit = limit.min(MAX_MESSAGES);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let response = match room.messages(latest_messages_options(limit)).await {
+            Ok(response) => response,
+            Err(err) => {
+                return Err(self
+                    .handle_request_error(err, CoreError::MessageLoadFailed)
+                    .await);
+            }
+        };
+        // `/messages` backwards returns the newest event first.
+        Ok(response
+            .chunk
+            .iter()
+            .rev()
+            .filter_map(|event| to_message(event, &own_user_id))
+            .collect())
+    }
+
+    /// Sends a plain text message (`m.room.message` / `m.text`) to a joined
+    /// room and returns its event ID once the homeserver accepted it.
+    ///
+    /// The body is sent unchanged but must contain non-whitespace characters.
+    /// The message shows up in [`load_messages`](Self::load_messages)
+    /// afterwards; no local echo is kept by the core.
+    pub async fn send_text_message(
+        &mut self,
+        room_id: &str,
+        body: &str,
+    ) -> Result<SentMessage, CoreError> {
+        self.require_authentication()?;
+        let room = self.joined_room(room_id)?;
+        if body.trim().is_empty() {
+            return Err(CoreError::InvalidMessage);
+        }
+
+        match room.send(RoomMessageEventContent::text_plain(body)).await {
+            Ok(sent) => Ok(SentMessage {
+                event_id: sent.response.event_id.to_string(),
+            }),
+            Err(err) => Err(self
+                .handle_request_error(err, CoreError::MessageSendFailed)
+                .await),
         }
     }
 
-    async fn handle_sync_error(&mut self, err: matrix_sdk::Error) -> CoreError {
+    /// Returns the authenticated user's ID, or `NotAuthenticated`.
+    fn require_authentication(&self) -> Result<String, CoreError> {
+        self.current_user().ok_or(CoreError::NotAuthenticated)
+    }
+
+    /// Finds a room the user has joined, in the client's local state.
+    fn joined_room(&self, room_id: &str) -> Result<Room, CoreError> {
+        let room = RoomId::parse(room_id)
+            .ok()
+            .and_then(|room_id| self.client.get_room(&room_id))
+            .ok_or(CoreError::RoomNotFound)?;
+        match room.state() {
+            RoomState::Joined => Ok(room),
+            _ => Err(CoreError::NotJoined),
+        }
+    }
+
+    /// Maps a failed authenticated request: a rejected token discards the
+    /// local session, connectivity issues are reported as such, anything else
+    /// uses `fallback`.
+    async fn handle_request_error(
+        &mut self,
+        err: matrix_sdk::Error,
+        fallback: fn(BoxError) -> CoreError,
+    ) -> CoreError {
         if matches!(
             err.client_api_error_kind(),
             Some(ErrorKind::UnknownToken(_))
@@ -260,7 +344,7 @@ impl MessengerCore {
         if is_network_error(&err) {
             return CoreError::HomeserverUnreachable(err.into());
         }
-        CoreError::SyncFailed(err.into())
+        fallback(err.into())
     }
 
     fn persist_session(&self) -> Result<(), CoreError> {
@@ -295,7 +379,7 @@ impl MessengerCore {
         Ok(())
     }
 
-    async fn discard_invalid_session(&mut self, cause: crate::error::BoxError) -> CoreError {
+    async fn discard_invalid_session(&mut self, cause: BoxError) -> CoreError {
         match self.discard_local_session().await {
             Ok(()) => CoreError::InvalidSession(cause),
             Err(err) => err,

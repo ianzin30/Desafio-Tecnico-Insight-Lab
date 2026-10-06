@@ -1,12 +1,17 @@
-//! Login, restore, room listing and logout against a real homeserver.
+//! Login, restore, room listing, messages and logout against a real
+//! homeserver.
 //!
 //! Ignored by default: it needs network access and a real account, provided
 //! through environment variables (never commit credentials):
 //!
 //! ```bash
 //! MATRIX_HOMESERVER=https://matrix.org MATRIX_USERNAME=alice MATRIX_PASSWORD=... \
-//!     cargo test --test live_login -- --ignored
+//!     cargo test --test live_login -- --ignored --nocapture
 //! ```
+//!
+//! Optional: `MATRIX_TEST_ROOM_ID=!room:server` also loads that room's latest
+//! messages. Only if `MATRIX_TEST_SEND=1` is set too, a test message is
+//! **sent** to that room.
 
 use messenger_core::{LogoutOutcome, MessengerCore, RestoreOutcome};
 
@@ -43,6 +48,22 @@ async fn session_and_rooms_on_a_real_homeserver() {
     println!("{} joined room(s)", rooms.len());
     for room in &rooms {
         println!("- {} (direct: {})", room.display_name, room.is_direct);
+    }
+
+    if let Ok(room_id) = std::env::var("MATRIX_TEST_ROOM_ID") {
+        let messages = core
+            .load_messages(&room_id, 20)
+            .await
+            .expect("messages load");
+        println!("{} message(s) in {room_id}", messages.len());
+
+        if std::env::var("MATRIX_TEST_SEND").as_deref() == Ok("1") {
+            let sent = core
+                .send_text_message(&room_id, "messenger_core live test")
+                .await
+                .expect("message sent");
+            println!("sent {}", sent.event_id);
+        }
     }
 
     assert_eq!(
