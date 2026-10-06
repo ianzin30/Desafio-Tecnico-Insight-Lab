@@ -177,6 +177,8 @@ fn wire__crate__api__messenger__MessengerApi_create_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_homeserver_url = <String>::sse_decode(&mut deserializer);
             let api_data_dir = <String>::sse_decode(&mut deserializer);
+            let api_secret_storage =
+                <crate::api::types::SecretStorage>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::types::ApiError>(
@@ -184,6 +186,7 @@ fn wire__crate__api__messenger__MessengerApi_create_impl(
                         let output_ok = crate::api::messenger::MessengerApi::create(
                             api_homeserver_url,
                             api_data_dir,
+                            api_secret_storage,
                         )
                         .await?;
                         std::result::Result::Ok(output_ok)
@@ -1156,6 +1159,18 @@ impl SseDecode for crate::api::types::RoomSummary {
     }
 }
 
+impl SseDecode for crate::api::types::SecretStorage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::types::SecretStorage::System,
+            1 => crate::api::types::SecretStorage::InMemory,
+            _ => unreachable!("Invalid variant for SecretStorage: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::types::SentMessage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1477,6 +1492,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::RoomSummary>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::SecretStorage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::System => 0.into_dart(),
+            Self::InMemory => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::types::SecretStorage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::SecretStorage>
+    for crate::api::types::SecretStorage
+{
+    fn into_into_dart(self) -> crate::api::types::SecretStorage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::types::SentMessage {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [self.event_id.into_into_dart().into_dart()].into_dart()
@@ -1762,6 +1798,22 @@ impl SseEncode for crate::api::types::RoomSummary {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.display_name, serializer);
         <bool>::sse_encode(self.is_direct, serializer);
+    }
+}
+
+impl SseEncode for crate::api::types::SecretStorage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::types::SecretStorage::System => 0,
+                crate::api::types::SecretStorage::InMemory => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 

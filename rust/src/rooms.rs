@@ -82,7 +82,7 @@ mod tests {
     use wiremock::ResponseTemplate;
 
     use crate::test_support::*;
-    use crate::{CoreError, MessengerCore, RestoreOutcome, RoomSummary};
+    use crate::{CoreError, RestoreOutcome, RoomSummary};
 
     fn state_event(event_type: &str, state_key: &str, content: Value) -> Value {
         json!({
@@ -180,9 +180,7 @@ mod tests {
     async fn rooms_require_authentication_without_any_request() {
         let server = mock_homeserver().await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         assert!(matches!(
             core.refresh_rooms().await,
@@ -324,9 +322,7 @@ mod tests {
         drop(core);
         let requests_before = server.received_requests().await.unwrap().len();
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         assert_eq!(
             core.restore_session().await.unwrap(),
             RestoreOutcome::Restored
@@ -352,9 +348,7 @@ mod tests {
         .await;
         let data_dir = TempDir::new().unwrap();
         drop(logged_in_core(&server, &data_dir).await);
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         core.restore_session().await.unwrap();
 
         let err = core.refresh_rooms().await.unwrap_err();

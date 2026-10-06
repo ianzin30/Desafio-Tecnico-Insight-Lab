@@ -16,6 +16,7 @@ Future<String> bridgeSmokeCheck() async {
     final api = await MessengerApi.create(
       homeserverUrl: 'https://matrix.org',
       dataDir: dataDir.path,
+      secretStorage: SecretStorage.system,
     );
     final restore = await api.restoreSession();
     final status =
@@ -57,13 +58,18 @@ void main() {
     );
 
     await expectLater(
-      MessengerApi.create(homeserverUrl: 'not a url', dataDir: dataDir.path),
+      MessengerApi.create(
+        homeserverUrl: 'not a url',
+        dataDir: dataDir.path,
+        secretStorage: SecretStorage.system,
+      ),
       throwsA(isA<ApiError_InvalidHomeserver>()),
     );
 
     final api = await MessengerApi.create(
       homeserverUrl: server.url,
       dataDir: dataDir.path,
+      secretStorage: SecretStorage.system,
     );
     await api.login(username: 'alice', password: FakeHomeserver.password);
     final received = api.events().firstWhere(
@@ -79,6 +85,8 @@ void main() {
     expect(api.syncState(), SyncState.running);
 
     await api.stopSync();
+    // Logging out also removes the secret from the real Keychain.
+    expect(await api.logout(), LogoutOutcome.complete);
     api.dispose();
     await server.close();
     await dataDir.delete(recursive: true);

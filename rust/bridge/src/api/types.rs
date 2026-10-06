@@ -40,6 +40,26 @@ pub struct SentMessage {
     pub event_id: String,
 }
 
+/// Where session secrets (access token, store key) are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretStorage {
+    /// The OS credential store (Keychain, Credential Manager, Secret
+    /// Service). Use this in the app.
+    System,
+    /// Process memory only: for automated tests, which must not touch the
+    /// user's credential store.
+    InMemory,
+}
+
+impl From<SecretStorage> for core::SecretStorage {
+    fn from(storage: SecretStorage) -> Self {
+        match storage {
+            SecretStorage::System => Self::System,
+            SecretStorage::InMemory => Self::InMemory,
+        }
+    }
+}
+
 /// Result of `restore_session`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreOutcome {

@@ -48,19 +48,31 @@ while let Some(event) = events.recv().await {
 
 ## Session persistence
 
-The caller provides `data_dir` (later: the Flutter app's per-OS data
-directory); the core hardcodes no platform path. Layout:
+The caller provides `data_dir` (the Flutter app's per-OS data directory);
+the core hardcodes no platform path. Layout:
 
 ```text
 <data_dir>/
-├── session.json   # MatrixSession (user ID, device ID, access token) + store name
-└── stores/<id>/   # Matrix SDK SQLite stores (state, encryption keys, caches)
+├── session.json   # non-secret metadata: homeserver, store, user and device IDs
+└── stores/<id>/   # Matrix SDK SQLite stores (state, encryption keys, caches), encrypted
 ```
 
-- The SDK's SQLite store does not keep the access token, so — as the SDK
-  documents — the core saves the `MatrixSession` in `session.json` (written
-  atomically, mode `0600` on Unix). **The password is never persisted.** The
-  token is stored in plain text; moving it to the OS keychain is future work.
+- **Secrets** (access/refresh tokens and the store's encryption key) are kept
+  in the OS credential store — Keychain, Windows Credential Manager, Secret
+  Service — through the `keyring` crate (`src/secrets.rs`), one entry per data
+  directory, service "Matrix Desktop". They never leave the Rust side.
+  `MessengerCore::with_secret_storage(.., SecretStorage::InMemory)` keeps them
+  in process memory instead, for automated tests. **The password is never
+  persisted.**
+- The SDK's SQLite store is encrypted by its store cipher with a random
+  256-bit key per store (`SqliteStoreConfig::key`, no passphrase derivation).
+- Saving writes the secrets first, then `session.json` (atomically, `0600` on
+  Unix); a failure leaves nothing restorable. An unavailable credential store
+  is reported as `CoreError::Storage` and discards nothing.
+- Sessions saved by the previous format (token inside `session.json`) are
+  migrated on first read: secrets moved to the credential store, file
+  rewritten without them; if the store is unavailable the old file keeps
+  working and migration is retried later.
 - Each login gets a new store directory; stores not referenced by a
   restorable session are deleted, so a later account never inherits data.
 - `restore_session()` returns `NoSession` (first run, not an error),
@@ -173,8 +185,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 The first build compiles the whole Matrix SDK dependency tree and takes a
 couple of minutes.
 
-`cargo test` needs no network or credentials: it uses a local mock homeserver
-and temporary data directories.
+`cargo test` needs no network, credentials nor the user's credential store:
+it uses a local mock homeserver, temporary data directories and the in-memory
+secret store. `cargo test -p messenger_core system_secret_store -- --ignored`
+checks the real credential store (writes and deletes one test item).
 
 ### Optional live test (login, restore, logout)
 

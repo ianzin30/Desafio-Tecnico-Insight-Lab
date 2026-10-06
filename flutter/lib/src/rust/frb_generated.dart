@@ -91,6 +91,7 @@ abstract class RustLibApi extends BaseApi {
   Future<MessengerApi> crateApiMessengerMessengerApiCreate({
     required String homeserverUrl,
     required String dataDir,
+    required SecretStorage secretStorage,
   });
 
   String? crateApiMessengerMessengerApiCurrentUser({
@@ -233,6 +234,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<MessengerApi> crateApiMessengerMessengerApiCreate({
     required String homeserverUrl,
     required String dataDir,
+    required SecretStorage secretStorage,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -240,6 +242,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(homeserverUrl, serializer);
           sse_encode_String(dataDir, serializer);
+          sse_encode_secret_storage(secretStorage, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -253,7 +256,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_api_error,
         ),
         constMeta: kCrateApiMessengerMessengerApiCreateConstMeta,
-        argValues: [homeserverUrl, dataDir],
+        argValues: [homeserverUrl, dataDir, secretStorage],
         apiImpl: this,
       ),
     );
@@ -262,7 +265,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiMessengerMessengerApiCreateConstMeta =>
       const TaskConstMeta(
         debugName: "MessengerApi_create",
-        argNames: ["homeserverUrl", "dataDir"],
+        argNames: ["homeserverUrl", "dataDir", "secretStorage"],
       );
 
   @override
@@ -912,6 +915,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SecretStorage dco_decode_secret_storage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return SecretStorage.values[raw as int];
+  }
+
+  @protected
   SentMessage dco_decode_sent_message(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1214,6 +1223,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SecretStorage sse_decode_secret_storage(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return SecretStorage.values[inner];
+  }
+
+  @protected
   SentMessage sse_decode_sent_message(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_eventId = sse_decode_String(deserializer);
@@ -1505,6 +1521,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.displayName, serializer);
     sse_encode_bool(self.isDirect, serializer);
+  }
+
+  @protected
+  void sse_encode_secret_storage(SecretStorage self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected

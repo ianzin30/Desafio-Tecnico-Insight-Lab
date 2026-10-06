@@ -169,6 +169,12 @@ api.dispose();                              // releases the core; closes the str
   `cancel()` if no event may follow.
 - `dispose()` drops the core inside the Rust async runtime (the Matrix SDK
   requires it when closing its stores).
+- `MessengerApi.create(..., secretStorage:)`: `SecretStorage.system` (the OS
+  credential store; the app) or `SecretStorage.inMemory` (automated tests).
+  Session secrets stay in Rust: Dart never sees the access token.
+- The synchronous getters (`currentUser`, `syncState`, `homeserver`) wait for
+  a running mutating call; the state layer avoids them in event handlers so a
+  slow request never freezes the UI.
 
 ## Tests
 

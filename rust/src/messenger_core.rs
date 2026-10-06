@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use matrix_sdk::config::{RequestConfig, SyncSettings};
@@ -6,7 +7,7 @@ use matrix_sdk::ruma::RoomId;
 use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::store::RoomLoadSettings;
-use matrix_sdk::{Client, HttpError, Room, RoomState};
+use matrix_sdk::{Client, HttpError, Room, RoomState, SqliteStoreConfig};
 use url::Url;
 
 use crate::CoreError;
@@ -15,7 +16,8 @@ use crate::homeserver::parse_homeserver_url;
 use crate::messages::{MAX_MESSAGES, Message, SentMessage, latest_messages_options, to_message};
 use crate::realtime::{CoreEvents, EventBus, SyncExit, SyncHandle, SyncState};
 use crate::rooms::{RoomSummary, joined_room_summaries, rooms_sync_filter};
-use crate::storage::{Storage, StoredSession};
+use crate::secrets::{SecretStorage, SecretStore, random_store_key, secret_store};
+use crate::storage::{LoadError, Storage, StoredSession};
 
 /// Result of [`MessengerCore::restore_session`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +51,9 @@ pub struct MessengerCore {
     storage: Storage,
     /// Name of the store directory used by `client`.
     store: String,
+    /// Hex-encoded encryption key of that store (SDK store cipher), kept in
+    /// the credential store with the session.
+    store_key: Option<String>,
     /// Event channels, kept across client rebuilds and sync runs.
     bus: EventBus,
     /// Running continuous sync, if any (at most one per core).
@@ -63,29 +68,61 @@ impl MessengerCore {
     /// installation) and created if missing. No request is sent to the
     /// homeserver here; call [`restore_session`](Self::restore_session) to
     /// resume a previous login.
+    ///
+    /// Session secrets are kept in the operating system's credential store.
     pub async fn new(homeserver_url: &str, data_dir: impl AsRef<Path>) -> Result<Self, CoreError> {
+        Self::with_secret_storage(homeserver_url, data_dir, SecretStorage::System).await
+    }
+
+    /// Like [`new`](Self::new), choosing where session secrets are kept
+    /// (tests use [`SecretStorage::InMemory`]).
+    pub async fn with_secret_storage(
+        homeserver_url: &str,
+        data_dir: impl AsRef<Path>,
+        secret_storage: SecretStorage,
+    ) -> Result<Self, CoreError> {
+        Self::with_secret_store(
+            homeserver_url,
+            data_dir.as_ref(),
+            secret_store(secret_storage),
+        )
+        .await
+    }
+
+    pub(crate) async fn with_secret_store(
+        homeserver_url: &str,
+        data_dir: &Path,
+        secrets: Arc<dyn SecretStore>,
+    ) -> Result<Self, CoreError> {
         let homeserver = parse_homeserver_url(homeserver_url)?;
-        let storage = Storage::open(data_dir.as_ref()).map_err(storage_error)?;
+        let storage = Storage::open(data_dir, secrets).map_err(storage_error)?;
 
         // Reopen the store of a session that may be restored; anything else
         // (no session, invalid file, other homeserver, unusable store) starts
-        // from a fresh store and `restore_session` reports it.
+        // from a fresh store and `restore_session` reports it. An unavailable
+        // credential store is an error: nothing is discarded then.
         let restorable = match storage.load_session() {
-            Ok(Some(stored)) if stored.homeserver == homeserver.as_str() => Some(stored.store),
-            _ => None,
+            Ok(Some(stored)) if stored.homeserver == homeserver.as_str() => {
+                Some((stored.store, stored.store_key))
+            }
+            Ok(_) | Err(LoadError::Invalid(_)) => None,
+            Err(LoadError::Unavailable(err)) => return Err(CoreError::Storage(err.into())),
         };
         let reopened = match restorable {
-            Some(store) => build_client(&homeserver, &storage, &store)
-                .await
-                .ok()
-                .map(|client| (client, store)),
+            Some((store, passphrase)) => {
+                build_client(&homeserver, &storage, &store, passphrase.as_deref())
+                    .await
+                    .ok()
+                    .map(|client| (client, store, passphrase))
+            }
             None => None,
         };
-        let (client, store) = match reopened {
+        let (client, store, store_key) = match reopened {
             Some(reopened) => reopened,
             None => {
-                let store = storage.create_store().map_err(storage_error)?;
-                (build_client(&homeserver, &storage, &store).await?, store)
+                let (store, key) = new_store(&storage)?;
+                let client = build_client(&homeserver, &storage, &store, key.as_deref()).await?;
+                (client, store, key)
             }
         };
         storage.remove_stores_except(&store);
@@ -95,6 +132,7 @@ impl MessengerCore {
             homeserver,
             storage,
             store,
+            store_key,
             bus: EventBus::new(),
             sync: None,
         })
@@ -123,7 +161,9 @@ impl MessengerCore {
         let stored = match self.storage.load_session() {
             Ok(None) => return Ok(RestoreOutcome::NoSession),
             Ok(Some(stored)) => stored,
-            Err(err) => return Err(self.discard_invalid_session(err).await),
+            Err(LoadError::Invalid(err)) => return Err(self.discard_invalid_session(err).await),
+            // Kept: the session may be fine once the store is available.
+            Err(LoadError::Unavailable(err)) => return Err(CoreError::Storage(err.into())),
         };
         if stored.homeserver != self.homeserver.as_str() {
             return Err(self
@@ -418,8 +458,15 @@ impl MessengerCore {
         let session = self.client.matrix_auth().session().ok_or_else(|| {
             CoreError::AuthenticationFailed("no session after successful login".into())
         })?;
-        let stored = StoredSession::new(self.homeserver.to_string(), self.store.clone(), session);
-        self.storage.save_session(&stored).map_err(storage_error)
+        let stored = StoredSession {
+            homeserver: self.homeserver.to_string(),
+            store: self.store.clone(),
+            session,
+            store_key: self.store_key.clone(),
+        };
+        self.storage
+            .save_session(&stored)
+            .map_err(CoreError::Storage)
     }
 
     /// Asks the homeserver to invalidate the access token. Returns whether
@@ -458,9 +505,10 @@ impl MessengerCore {
         self.stop_running_sync().await;
         self.storage.remove_session().map_err(storage_error)?;
 
-        let store = self.storage.create_store().map_err(storage_error)?;
-        self.client = build_client(&self.homeserver, &self.storage, &store).await?;
+        let (store, key) = new_store(&self.storage)?;
+        self.client = build_client(&self.homeserver, &self.storage, &store, key.as_deref()).await?;
         self.store = store;
+        self.store_key = key;
         self.storage.remove_stores_except(&self.store);
         Ok(())
     }
@@ -483,11 +531,39 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// network failures but retries transient server errors for up to 15 min.
 const REQUEST_ATTEMPTS: usize = 2;
 
+/// Creates an empty store directory and a random encryption key for it.
+fn new_store(storage: &Storage) -> Result<(String, Option<String>), CoreError> {
+    let store = storage.create_store().map_err(storage_error)?;
+    #[cfg(test)]
+    if LEGACY_UNENCRYPTED_STORES.get() {
+        return Ok((store, None));
+    }
+    let key = random_store_key().map_err(|err| CoreError::Storage(err.into()))?;
+    Ok((store, Some(key)))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests only: create stores like the previous version did (without
+    /// encryption), to test the migration of its sessions.
+    pub(crate) static LEGACY_UNENCRYPTED_STORES: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Builds the Matrix client on `store`, encrypted by the SDK's store cipher
+/// with `key` (hex; `None`: a store created before encryption was used). The
+/// key is random, so it is used directly, without passphrase derivation.
 async fn build_client(
     homeserver: &Url,
     storage: &Storage,
     store: &str,
+    key: Option<&str>,
 ) -> Result<Client, CoreError> {
+    let key = key
+        .map(decode_hex)
+        .transpose()
+        .map_err(|err| CoreError::ClientInitialization(err.into()))?;
+    let store_config = SqliteStoreConfig::new(storage.store_path(store)).key(key.as_deref());
     Client::builder()
         .homeserver_url(homeserver)
         // Keep the configured homeserver: a session is bound to it.
@@ -500,7 +576,7 @@ async fn build_client(
                 .timeout(REQUEST_TIMEOUT)
                 .retry_limit(REQUEST_ATTEMPTS),
         )
-        .sqlite_store(storage.store_path(store), None)
+        .sqlite_store_with_config_and_cache_path(store_config, None::<&Path>)
         .build()
         .await
         .map_err(|err| CoreError::ClientInitialization(err.into()))
@@ -534,6 +610,16 @@ fn is_network_http_error(err: &HttpError) -> bool {
     }
 }
 
+fn decode_hex(hex: &str) -> Result<Vec<u8>, &'static str> {
+    if !hex.len().is_multiple_of(2) {
+        return Err("invalid store key");
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| "invalid store key"))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -547,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn builds_client_for_homeserver() {
         let data_dir = TempDir::new().unwrap();
-        let core = MessengerCore::new("https://matrix.org", data_dir.path())
+        let core = test_core("https://matrix.org", data_dir.path())
             .await
             .unwrap();
 
@@ -557,9 +643,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_invalid_homeserver_without_building_client() {
         let data_dir = TempDir::new().unwrap();
-        let err = MessengerCore::new("matrix.org", data_dir.path())
-            .await
-            .unwrap_err();
+        let err = test_core("matrix.org", data_dir.path()).await.unwrap_err();
 
         assert!(matches!(err, CoreError::InvalidHomeserver { .. }));
     }
@@ -567,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn first_run_has_no_session_to_restore() {
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new("https://matrix.org", data_dir.path())
+        let mut core = test_core("https://matrix.org", data_dir.path())
             .await
             .unwrap();
 
@@ -593,9 +677,7 @@ mod tests {
     async fn login_persists_the_session_but_not_the_password() {
         let server = alice_homeserver().await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         core.login("alice", "s3cr3t-password").await.unwrap();
 
@@ -619,9 +701,7 @@ mod tests {
         let data_dir = TempDir::new().unwrap();
         drop(logged_in_core(&server, &data_dir).await);
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         assert_eq!(core.current_user(), None);
 
         assert_eq!(
@@ -654,9 +734,7 @@ mod tests {
         assert!(!session_file(&data_dir).exists());
         drop(core);
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         assert_eq!(
             core.restore_session().await.unwrap(),
             RestoreOutcome::NoSession
@@ -679,9 +757,7 @@ mod tests {
         assert_eq!(core.current_user(), None);
         drop(core);
 
-        let mut core = MessengerCore::new(&homeserver, data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&homeserver, data_dir.path()).await.unwrap();
         assert_eq!(
             core.restore_session().await.unwrap(),
             RestoreOutcome::NoSession
@@ -706,9 +782,7 @@ mod tests {
         assert_eq!(core.current_user().as_deref(), Some("@bob:example.org"));
         drop(core);
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         assert_eq!(
             core.restore_session().await.unwrap(),
             RestoreOutcome::Restored
@@ -723,9 +797,7 @@ mod tests {
         drop(logged_in_core(&server, &data_dir).await);
         std::fs::write(session_file(&data_dir), "{ not json").unwrap();
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         let err = core.restore_session().await.unwrap_err();
 
         assert!(matches!(err, CoreError::InvalidSession(_)));
@@ -744,7 +816,7 @@ mod tests {
         let data_dir = TempDir::new().unwrap();
         drop(logged_in_core(&server, &data_dir).await);
 
-        let mut core = MessengerCore::new("https://other.example.org", data_dir.path())
+        let mut core = test_core("https://other.example.org", data_dir.path())
             .await
             .unwrap();
         let err = core.restore_session().await.unwrap_err();
@@ -778,9 +850,7 @@ mod tests {
         )
         .await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         let err = core.login("alice", "wrong").await.unwrap_err();
 
@@ -794,9 +864,7 @@ mod tests {
         // No mock is mounted: any request would fail with a different error.
         let server = MockServer::start().await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         for (username, password) in [("", "secret"), ("   ", "secret"), ("alice", "")] {
             let err = core.login(username, password).await.unwrap_err();
@@ -812,7 +880,7 @@ mod tests {
         let url = format!("http://{}", listener.local_addr().unwrap());
         drop(listener);
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&url, data_dir.path()).await.unwrap();
+        let mut core = test_core(&url, data_dir.path()).await.unwrap();
 
         let err = core.login("alice", "secret").await.unwrap_err();
 
@@ -827,9 +895,7 @@ mod tests {
         let server = mock_homeserver().await;
         mock_login_response(&server, ResponseTemplate::new(404)).await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         let err = core.login("alice", "s3cr3t-password").await.unwrap_err();
 

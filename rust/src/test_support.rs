@@ -5,7 +5,16 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::MessengerCore;
+use crate::{CoreError, MessengerCore, SecretStorage};
+
+/// A core keeping its session secrets in memory, so tests never touch the
+/// user's credential store.
+pub(crate) async fn test_core(
+    homeserver_url: &str,
+    data_dir: &std::path::Path,
+) -> Result<MessengerCore, CoreError> {
+    MessengerCore::with_secret_storage(homeserver_url, data_dir, SecretStorage::InMemory).await
+}
 
 /// A local mock homeserver that advertises a supported spec version and
 /// accepts logouts.
@@ -67,9 +76,7 @@ pub(crate) async fn alice_homeserver() -> MockServer {
 }
 
 pub(crate) async fn logged_in_core(server: &MockServer, data_dir: &TempDir) -> MessengerCore {
-    let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-        .await
-        .unwrap();
+    let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
     core.login("alice", "secret").await.unwrap();
     core
 }

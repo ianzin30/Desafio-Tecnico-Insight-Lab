@@ -9,6 +9,7 @@ import 'package:messenger_app/app/messenger_controller.dart';
 import 'package:messenger_app/app/messenger_gateway.dart';
 import 'package:messenger_app/app/messenger_state.dart';
 import 'package:messenger_app/app/providers.dart';
+import 'package:messenger_app/messenger_core.dart';
 
 import 'fake_homeserver.dart';
 
@@ -42,6 +43,7 @@ class AppHarness {
           final gateway = await RustMessengerGateway.create(
             homeserverUrl: homeserverUrl,
             dataDir: engineDir,
+            secretStorage: SecretStorage.inMemory,
           );
           gateways.add(gateway);
           gatewayHomeservers.add(homeserverUrl);

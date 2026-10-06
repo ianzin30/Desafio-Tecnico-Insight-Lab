@@ -36,6 +36,13 @@ class FakeHomeserver {
   /// an entry use [messagesChunk] and answer immediately.
   final Map<String, List<Map<String, dynamic>>> roomMessages = {};
   final Map<String, Duration> messagesDelay = {};
+
+  /// When set, every `/messages` (resp. send) request gets this answer.
+  FakeResponse? messagesOverride;
+  FakeResponse? sendOverride;
+
+  /// Delay before answering a send.
+  Duration sendDelay = Duration.zero;
   int requestCount = 0;
 
   String get url => 'http://127.0.0.1:${_server.port}';
@@ -88,13 +95,17 @@ class FakeHomeserver {
     } else if (path.endsWith('/messages')) {
       final segments = request.uri.pathSegments;
       final roomId = segments[segments.length - 2];
-      response = FakeResponse({
-        'start': 't1',
-        'chunk': roomMessages[roomId] ?? messagesChunk,
-      }, delay: messagesDelay[roomId] ?? Duration.zero);
+      response =
+          messagesOverride ??
+          FakeResponse({
+            'start': 't1',
+            'chunk': roomMessages[roomId] ?? messagesChunk,
+          }, delay: messagesDelay[roomId] ?? Duration.zero);
     } else if (path.contains('/send/m.room.message/')) {
       sentMessages.add(jsonDecode(body) as Map<String, dynamic>);
-      response = const FakeResponse({r'event_id': r'$sent'});
+      response =
+          sendOverride ??
+          FakeResponse({r'event_id': r'$sent'}, delay: sendDelay);
     } else {
       // Includes the encryption state lookup before sending: not encrypted.
       response = const FakeResponse({
@@ -140,3 +151,9 @@ Map<String, dynamic> syncBody(
     },
   },
 };
+
+/// The answer of a homeserver that revoked the access token.
+const revokedToken = FakeResponse({
+  'errcode': 'M_UNKNOWN_TOKEN',
+  'error': 'Invalid access token',
+}, status: 401);

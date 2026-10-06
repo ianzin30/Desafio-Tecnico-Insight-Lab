@@ -83,7 +83,7 @@ mod tests {
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
     use crate::test_support::*;
-    use crate::{CoreError, Message, MessengerCore, SentMessage};
+    use crate::{CoreError, Message, SentMessage};
 
     const ROOM: &str = "!room:example.org";
 
@@ -173,9 +173,7 @@ mod tests {
     async fn messages_require_authentication_without_any_request() {
         let server = mock_homeserver().await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         assert!(matches!(
             core.load_messages(ROOM, 50).await,
@@ -299,9 +297,7 @@ mod tests {
         let data_dir = TempDir::new().unwrap();
         drop(core_with_rooms(&server, &data_dir, &[ROOM], &[], &[]).await);
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         core.restore_session().await.unwrap();
 
         // No new sync: the joined room comes from the SDK store, the messages

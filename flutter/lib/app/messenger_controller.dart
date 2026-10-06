@@ -212,7 +212,10 @@ class MessengerController extends Notifier<MessengerState> {
       phase: AppPhase.unauthenticated,
       homeserver: state.homeserver,
       auth: AuthState(notice: notice),
-      syncState: _gateway?.syncState() ?? SyncState.stopped,
+      // A session ends with its sync stopped (logout or revocation). Not
+      // asked to the engine: its synchronous getters wait for a running call
+      // (e.g. a slow send) and would freeze the UI meanwhile.
+      syncState: SyncState.stopped,
     );
   }
 

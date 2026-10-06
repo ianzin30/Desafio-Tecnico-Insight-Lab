@@ -102,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RoomSummary dco_decode_room_summary(dynamic raw);
 
   @protected
+  SecretStorage dco_decode_secret_storage(dynamic raw);
+
+  @protected
   SentMessage dco_decode_sent_message(dynamic raw);
 
   @protected
@@ -198,6 +201,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RoomSummary sse_decode_room_summary(SseDeserializer deserializer);
+
+  @protected
+  SecretStorage sse_decode_secret_storage(SseDeserializer deserializer);
 
   @protected
   SentMessage sse_decode_sent_message(SseDeserializer deserializer);
@@ -313,6 +319,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_room_summary(RoomSummary self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_secret_storage(SecretStorage self, SseSerializer serializer);
 
   @protected
   void sse_encode_sent_message(SentMessage self, SseSerializer serializer);

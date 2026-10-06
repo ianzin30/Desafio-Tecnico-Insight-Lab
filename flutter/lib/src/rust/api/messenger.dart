@@ -23,13 +23,16 @@ abstract class MessengerApi implements RustOpaqueInterface {
 
   /// Creates the client for `homeserver_url` (e.g. `https://matrix.org`),
   /// storing its data in `data_dir` (an app data directory chosen by the
-  /// caller). Does not restore any session: call `restore_session`.
+  /// caller) and its session secrets in `secret_storage`. Does not restore
+  /// any session: call `restore_session`.
   static Future<MessengerApi> create({
     required String homeserverUrl,
     required String dataDir,
+    required SecretStorage secretStorage,
   }) => RustLib.instance.api.crateApiMessengerMessengerApiCreate(
     homeserverUrl: homeserverUrl,
     dataDir: dataDir,
+    secretStorage: secretStorage,
   );
 
   /// Matrix ID of the authenticated user, or `None`.

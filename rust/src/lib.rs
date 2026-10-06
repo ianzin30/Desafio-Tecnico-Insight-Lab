@@ -9,11 +9,14 @@
 //! [`CoreEvent`]s).
 
 mod error;
+#[cfg(test)]
+mod hardening_tests;
 mod homeserver;
 mod messages;
 mod messenger_core;
 mod realtime;
 mod rooms;
+mod secrets;
 mod storage;
 #[cfg(test)]
 mod test_support;
@@ -23,3 +26,4 @@ pub use messages::{MAX_MESSAGES, Message, SentMessage};
 pub use messenger_core::{LogoutOutcome, MessengerCore, RestoreOutcome};
 pub use realtime::{CoreEvent, CoreEvents, SyncState};
 pub use rooms::RoomSummary;
+pub use secrets::SecretStorage;

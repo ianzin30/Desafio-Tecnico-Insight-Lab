@@ -375,7 +375,7 @@ mod tests {
     use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
     use crate::test_support::*;
-    use crate::{CoreError, CoreEvent, CoreEvents, MessengerCore, RoomSummary, SyncState};
+    use crate::{CoreError, CoreEvent, CoreEvents, RoomSummary, SyncState};
 
     const ROOM_A: &str = "!a:example.org";
     const ROOM_B: &str = "!b:example.org";
@@ -533,9 +533,7 @@ mod tests {
     async fn start_requires_authentication() {
         let server = realtime_homeserver().await;
         let data_dir = TempDir::new().unwrap();
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
 
         assert!(matches!(
             core.start_sync().await,
@@ -942,9 +940,7 @@ mod tests {
         core.stop_sync().await.unwrap();
         drop(core);
 
-        let mut core = MessengerCore::new(&server.uri(), data_dir.path())
-            .await
-            .unwrap();
+        let mut core = test_core(&server.uri(), data_dir.path()).await.unwrap();
         core.restore_session().await.unwrap();
         let mut events = core.subscribe_events();
         core.start_sync().await.unwrap();

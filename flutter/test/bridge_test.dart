@@ -98,8 +98,11 @@ void main() {
     await dataDir.delete(recursive: true);
   });
 
-  Future<MessengerApi> create() =>
-      MessengerApi.create(homeserverUrl: server.url, dataDir: dataDir.path);
+  Future<MessengerApi> create() => MessengerApi.create(
+    homeserverUrl: server.url,
+    dataDir: dataDir.path,
+    secretStorage: SecretStorage.inMemory,
+  );
 
   Future<MessengerApi> loggedIn() async {
     final api = await create();
@@ -121,7 +124,11 @@ void main() {
 
     test('invalid configuration is a typed error', () async {
       await expectLater(
-        MessengerApi.create(homeserverUrl: 'matrix.org', dataDir: dataDir.path),
+        MessengerApi.create(
+          homeserverUrl: 'matrix.org',
+          dataDir: dataDir.path,
+          secretStorage: SecretStorage.inMemory,
+        ),
         throwsA(isA<ApiError_InvalidHomeserver>()),
       );
     });

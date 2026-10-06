@@ -9,8 +9,8 @@ use flutter_rust_bridge::frb;
 use messenger_core::MessengerCore;
 
 use super::types::{
-    ApiError, CoreEvent, LogoutOutcome, Message, RestoreOutcome, RoomSummary, SentMessage,
-    SyncState,
+    ApiError, CoreEvent, LogoutOutcome, Message, RestoreOutcome, RoomSummary, SecretStorage,
+    SentMessage, SyncState,
 };
 use crate::frb_generated::StreamSink;
 
@@ -34,11 +34,19 @@ pub struct MessengerApi {
 impl MessengerApi {
     /// Creates the client for `homeserver_url` (e.g. `https://matrix.org`),
     /// storing its data in `data_dir` (an app data directory chosen by the
-    /// caller). Does not restore any session: call `restore_session`.
-    pub async fn create(homeserver_url: String, data_dir: String) -> Result<Self, ApiError> {
+    /// caller) and its session secrets in `secret_storage`. Does not restore
+    /// any session: call `restore_session`.
+    pub async fn create(
+        homeserver_url: String,
+        data_dir: String,
+        secret_storage: SecretStorage,
+    ) -> Result<Self, ApiError> {
+        let core =
+            MessengerCore::with_secret_storage(&homeserver_url, data_dir, secret_storage.into())
+                .await?;
         Ok(Self {
             core: DropInRuntime {
-                value: Some(MessengerCore::new(&homeserver_url, data_dir).await?),
+                value: Some(core),
                 // `create` runs on the bridge's Tokio runtime.
                 runtime: tokio::runtime::Handle::current(),
             },

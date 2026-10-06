@@ -43,13 +43,20 @@ final class RustMessengerGateway implements MessengerGateway {
   final MessengerApi _api;
 
   /// Loads the Rust library (once per process) and creates the engine.
+  /// Session secrets stay in Rust, in the OS credential store unless
+  /// [secretStorage] says otherwise (automated tests).
   static Future<RustMessengerGateway> create({
     required String homeserverUrl,
     required String dataDir,
+    SecretStorage secretStorage = SecretStorage.system,
   }) async {
     if (!RustLib.instance.initialized) await RustLib.init();
     return RustMessengerGateway._(
-      await MessengerApi.create(homeserverUrl: homeserverUrl, dataDir: dataDir),
+      await MessengerApi.create(
+        homeserverUrl: homeserverUrl,
+        dataDir: dataDir,
+        secretStorage: secretStorage,
+      ),
     );
   }
 
