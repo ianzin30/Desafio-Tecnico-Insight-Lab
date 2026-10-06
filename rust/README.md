@@ -18,7 +18,9 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
   `cached_rooms()` returns them from the local store without network.
 - `load_messages(room_id, limit)` returns the latest text messages of a joined
   room; `send_text_message(room_id, body)` sends one.
-- **Not implemented yet:** continuous sync / realtime updates, media, invites.
+- `start_sync()` / `stop_sync()` run a continuous sync that emits `CoreEvent`s
+  (`subscribe_events()`).
+- **Not implemented yet:** Flutter Rust Bridge, media, invites.
 
 ```rust
 use messenger_core::{MessengerCore, RestoreOutcome};
@@ -32,6 +34,16 @@ assert_eq!(core.current_user().as_deref(), Some("@alice:matrix.org"));
 let rooms = core.refresh_rooms().await?; // Vec<RoomSummary { id, display_name, is_direct }>
 let messages = core.load_messages(&rooms[0].id, 50).await?; // oldest first
 let sent = core.send_text_message(&rooms[0].id, "Olá!").await?; // SentMessage { event_id }
+
+let mut events = core.subscribe_events();
+core.start_sync().await?;
+while let Some(event) = events.recv().await {
+    match event {
+        CoreEvent::MessageReceived { room_id, message } => { /* ... */ }
+        CoreEvent::RoomsChanged => { /* core.cached_rooms() */ }
+        _ => {}
+    }
+}
 ```
 
 ## Session persistence
@@ -103,6 +115,34 @@ directory); the core hardcodes no platform path. Layout:
 - Errors: `NotAuthenticated`, `RoomNotFound` (invalid or unknown room ID),
   `NotJoined` (invited/left rooms), `InvalidMessage`, `MessageLoadFailed`,
   `MessageSendFailed`, plus `HomeserverUnreachable` and `SessionRevoked` as for rooms.
+
+## Continuous sync (realtime)
+
+- `start_sync()` spawns one background task (Tokio) looping over
+  `Client::sync_once` with 30 s long polling; a second `start_sync()` fails
+  with `AlreadySyncing`. `stop_sync()` stops it and waits for the task;
+  `logout()` stops it first; dropping the core aborts it. Nothing starts
+  implicitly.
+- **Baseline:** the first sync of each run (no timeline, rooms filter) never
+  emits messages, so history — including what arrived while the app was
+  closed — is not reported as new. Later syncs (timeline ≤ 50 events per room)
+  emit `MessageReceived` for supported text messages (same `Message` model as
+  `load_messages`), once per event ID (bounded memory of the last 1024 IDs).
+- The user's own messages are emitted once, with `is_own: true`, when the sync
+  confirms them; their ID equals `SentMessage::event_id`. No local echo.
+- `RoomsChanged` is emitted when the `cached_rooms()` list differs after a
+  sync; `TimelineGap { room_id }` when the sync skipped messages of a room.
+- `SyncStateChanged`: `Starting` → `Running`; failures (offline, timeout,
+  server error) switch to `Recovering` and retry with backoff (1 s doubling up
+  to 30 s) until stopped. `M_UNKNOWN_TOKEN` is terminal: `SessionRevoked`, the
+  session file is removed, the sync stops (`Stopped`) and a new login is needed.
+- Events go through a bounded broadcast channel (256): a slow receiver gets
+  `EventsLost { count }` and should reload rooms and messages.
+- While syncing, `refresh_rooms()` returns the continuously synced rooms
+  without its own sync. The sync token and state stay in the SDK store, so a
+  restart resumes from the last processed sync.
+- The SDK event cache is still not used: sync responses already carry the new
+  (decrypted) timeline events, and `load_messages()` keeps loading history.
 
 ## Network policy
 

@@ -1,5 +1,5 @@
-//! Login, restore, room listing, messages and logout against a real
-//! homeserver.
+//! Login, restore, room listing, messages, continuous sync and logout
+//! against a real homeserver.
 //!
 //! Ignored by default: it needs network access and a real account, provided
 //! through environment variables (never commit credentials):
@@ -13,7 +13,7 @@
 //! messages. Only if `MATRIX_TEST_SEND=1` is set too, a test message is
 //! **sent** to that room.
 
-use messenger_core::{LogoutOutcome, MessengerCore, RestoreOutcome};
+use messenger_core::{CoreEvent, LogoutOutcome, MessengerCore, RestoreOutcome, SyncState};
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set"))
@@ -65,6 +65,21 @@ async fn session_and_rooms_on_a_real_homeserver() {
             println!("sent {}", sent.event_id);
         }
     }
+
+    // Continuous sync: wait (bounded) until it is up to date, then stop.
+    let mut events = core.subscribe_events();
+    core.start_sync().await.expect("sync starts");
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while let Some(event) = events.recv().await {
+            println!("event: {event:?}");
+            if event == CoreEvent::SyncStateChanged(SyncState::Running) {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("sync reaches Running");
+    core.stop_sync().await.expect("sync stops");
 
     assert_eq!(
         core.logout().await.expect("logout succeeds"),

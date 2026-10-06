@@ -51,7 +51,7 @@ impl StoredSession {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Storage {
     data_dir: PathBuf,
 }

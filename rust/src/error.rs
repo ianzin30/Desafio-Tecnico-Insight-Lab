@@ -53,6 +53,10 @@ pub enum CoreError {
     #[error("synchronization with the homeserver failed")]
     SyncFailed(#[source] BoxError),
 
+    /// The continuous sync is already running.
+    #[error("the sync is already running")]
+    AlreadySyncing,
+
     /// The room ID is invalid or unknown to the client (refresh the rooms if
     /// it was joined recently).
     #[error("room not found")]

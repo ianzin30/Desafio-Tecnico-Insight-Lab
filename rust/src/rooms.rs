@@ -34,18 +34,30 @@ pub(crate) async fn joined_room_summaries(client: &Client) -> Result<Vec<RoomSum
     Ok(summaries)
 }
 
-/// `/sync` filter for listing rooms.
-///
+/// `/sync` filter for listing rooms: no timeline events.
+pub(crate) fn rooms_sync_filter() -> Filter {
+    sync_filter(0)
+}
+
+/// `/sync` filter for continuous sync: at most `REALTIME_TIMELINE_LIMIT`
+/// timeline events per room and sync (more are reported as a gap).
+pub(crate) fn realtime_sync_filter() -> Filter {
+    sync_filter(REALTIME_TIMELINE_LIMIT)
+}
+
+const REALTIME_TIMELINE_LIMIT: u32 = 50;
+
 /// Only data that can be recovered later or is transient is reduced: room
 /// state and account data skipped by a sync are never resent by the following
 /// incremental syncs, so they are kept in full.
-pub(crate) fn rooms_sync_filter() -> Filter {
+fn sync_filter(timeline_limit: u32) -> Filter {
     let mut filter = FilterDefinition::default();
-    // No messages: listing rooms does not need them. The timeline is marked
-    // `limited`, so history stays reachable later through pagination.
-    filter.room.timeline.limit = Some(UInt::MIN);
+    // Limited timeline: the server marks it `limited` when events were
+    // skipped, so history stays reachable later through pagination.
+    filter.room.timeline.limit = Some(UInt::from(timeline_limit));
     // Lazy-load members: the server only sends those needed (the room
-    // summary heroes used to name DMs); others can be fetched on demand.
+    // summary heroes used to name DMs, timeline senders); others can be
+    // fetched on demand.
     filter.room.state.lazy_load_options = LazyLoadOptions::Enabled {
         include_redundant_members: false,
     };

@@ -13,6 +13,7 @@ use crate::CoreError;
 use crate::error::BoxError;
 use crate::homeserver::parse_homeserver_url;
 use crate::messages::{MAX_MESSAGES, Message, SentMessage, latest_messages_options, to_message};
+use crate::realtime::{CoreEvents, EventBus, SyncExit, SyncHandle, SyncState};
 use crate::rooms::{RoomSummary, joined_room_summaries, rooms_sync_filter};
 use crate::storage::{Storage, StoredSession};
 
@@ -48,6 +49,10 @@ pub struct MessengerCore {
     storage: Storage,
     /// Name of the store directory used by `client`.
     store: String,
+    /// Event channels, kept across client rebuilds and sync runs.
+    bus: EventBus,
+    /// Running continuous sync, if any (at most one per core).
+    sync: Option<SyncHandle>,
 }
 
 impl MessengerCore {
@@ -90,6 +95,8 @@ impl MessengerCore {
             homeserver,
             storage,
             store,
+            bus: EventBus::new(),
+            sync: None,
         })
     }
 
@@ -108,6 +115,7 @@ impl MessengerCore {
     /// No request is sent: a token revoked server-side is only detected by
     /// the next request to the homeserver.
     pub async fn restore_session(&mut self) -> Result<RestoreOutcome, CoreError> {
+        self.reconcile_sync().await?;
         if self.current_user().is_some() {
             return Err(CoreError::AlreadyAuthenticated);
         }
@@ -152,6 +160,7 @@ impl MessengerCore {
     /// instead of replacing the session. `&mut self` ensures no two logins
     /// can run concurrently on the same instance.
     pub async fn login(&mut self, username: &str, password: &str) -> Result<(), CoreError> {
+        self.reconcile_sync().await?;
         if self.current_user().is_some() {
             return Err(CoreError::AlreadyAuthenticated);
         }
@@ -188,6 +197,9 @@ impl MessengerCore {
     /// [`LogoutOutcome::LocalOnly`] is returned. Logging out an
     /// unauthenticated core only clears leftover local state.
     pub async fn logout(&mut self) -> Result<LogoutOutcome, CoreError> {
+        // The sync is stopped first so it never uses the session being ended.
+        self.reconcile_sync().await?;
+        self.stop_running_sync().await;
         let revoked = if self.current_user().is_some() {
             self.revoke_remote_session().await
         } else {
@@ -207,7 +219,54 @@ impl MessengerCore {
     ///
     /// Read directly from the Matrix client's session state.
     pub fn current_user(&self) -> Option<String> {
+        // The client cannot forget its session in place: a token rejected
+        // during continuous sync is reflected here until the core rebuilds
+        // the client on its next call.
+        if self.sync.as_ref().is_some_and(SyncHandle::session_revoked) {
+            return None;
+        }
         self.client.user_id().map(ToString::to_string)
+    }
+
+    /// Subscribes to the events of the continuous sync. Subscribe before
+    /// [`start_sync`](Self::start_sync) to receive every event; each receiver
+    /// gets all events emitted after its creation.
+    pub fn subscribe_events(&self) -> CoreEvents {
+        self.bus.subscribe()
+    }
+
+    /// Current state of the continuous sync.
+    pub fn sync_state(&self) -> SyncState {
+        self.bus.state()
+    }
+
+    /// Starts the continuous sync in a background task, which emits
+    /// [`CoreEvent`](crate::CoreEvent)s until [`stop_sync`](Self::stop_sync),
+    /// [`logout`](Self::logout), a revoked session or the core being dropped.
+    ///
+    /// Returns immediately, in state [`SyncState::Starting`]. Fails with
+    /// [`CoreError::AlreadySyncing`] if a sync is already running.
+    pub async fn start_sync(&mut self) -> Result<(), CoreError> {
+        self.reconcile_sync().await?;
+        let own_user_id = self.require_authentication()?;
+        if self.sync.is_some() {
+            return Err(CoreError::AlreadySyncing);
+        }
+        self.sync = Some(SyncHandle::spawn(
+            self.client.clone(),
+            self.storage.clone(),
+            own_user_id,
+            self.bus.clone(),
+        ));
+        Ok(())
+    }
+
+    /// Stops the continuous sync and waits for its task to end. Does nothing
+    /// if it is not running.
+    pub async fn stop_sync(&mut self) -> Result<(), CoreError> {
+        self.reconcile_sync().await?;
+        self.stop_running_sync().await;
+        Ok(())
     }
 
     /// Synchronizes once with the homeserver, then returns the joined
@@ -220,7 +279,13 @@ impl MessengerCore {
     /// If the homeserver rejects the access token, the local session is
     /// discarded and [`CoreError::SessionRevoked`] is returned.
     pub async fn refresh_rooms(&mut self) -> Result<Vec<RoomSummary>, CoreError> {
+        self.reconcile_sync().await?;
         self.require_authentication()?;
+        // The continuous sync already keeps the rooms up to date; a second
+        // concurrent sync would consume events it must report.
+        if self.sync.is_some() {
+            return self.cached_rooms().await;
+        }
 
         // Timeout zero: the server answers immediately instead of long polling
         // for new events. The sync token stored by the SDK is reused, so each
@@ -256,6 +321,7 @@ impl MessengerCore {
         room_id: &str,
         limit: u16,
     ) -> Result<Vec<Message>, CoreError> {
+        self.reconcile_sync().await?;
         let own_user_id = self.require_authentication()?;
         let room = self.joined_room(room_id)?;
         let limit = limit.min(MAX_MESSAGES);
@@ -291,6 +357,7 @@ impl MessengerCore {
         room_id: &str,
         body: &str,
     ) -> Result<SentMessage, CoreError> {
+        self.reconcile_sync().await?;
         self.require_authentication()?;
         let room = self.joined_room(room_id)?;
         if body.trim().is_empty() {
@@ -369,7 +436,26 @@ impl MessengerCore {
 
     /// Deletes the persisted session and switches to a new client on a fresh
     /// store; the previous store is deleted.
+    /// Applies the outcome of a sync task that ended on its own: a revoked
+    /// session is discarded like any other.
+    async fn reconcile_sync(&mut self) -> Result<(), CoreError> {
+        if let Some(sync) = self.sync.take_if(|sync| sync.is_finished())
+            && sync.stop().await == SyncExit::SessionRevoked
+        {
+            self.discard_local_session().await?;
+        }
+        Ok(())
+    }
+
+    async fn stop_running_sync(&mut self) {
+        if let Some(sync) = self.sync.take() {
+            sync.stop().await;
+        }
+    }
+
     async fn discard_local_session(&mut self) -> Result<(), CoreError> {
+        // The sync task holds the client being replaced.
+        self.stop_running_sync().await;
         self.storage.remove_session().map_err(storage_error)?;
 
         let store = self.storage.create_store().map_err(storage_error)?;
