@@ -1,0 +1,23 @@
+[package]
+name = "messenger_bridge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+description = "Flutter Rust Bridge adapter exposing messenger_core to Dart."
+publish = false
+
+[lib]
+# Both are required by the Flutter build hook (native_toolchain_rust), which
+# picks the one matching the platform's link mode (dynamic on desktop).
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+messenger_core = { path = ".." }
+# Pinned exactly: must match the Dart `flutter_rust_bridge` package and the
+# `flutter_rust_bridge_codegen` version used to generate the bindings.
+flutter_rust_bridge = "=2.13.0"
+tokio = { version = "1.53.2", features = ["rt"] }
+
+[lints.rust]
+# Emitted by flutter_rust_bridge macros.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

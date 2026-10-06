@@ -1,0 +1,7 @@
+# flutter_rust_bridge_codegen configuration (run `flutter_rust_bridge_codegen
+# generate` from this directory).
+rust_input: crate::api
+rust_root: ../rust/bridge/
+dart_output: lib/src/rust
+# Desktop only (macOS, Windows, Linux).
+web: false

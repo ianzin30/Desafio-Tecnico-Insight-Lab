@@ -6,8 +6,8 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
 ## Status
 
 - `matrix-sdk` 0.19 is configured (default features: E2EE, SQLite stores, rustls).
-- `flutter_rust_bridge` 2.13.0 is declared (pinned; the Dart package must use the
-  same version). No bridge API, codegen or Flutter project exists yet.
+- `bridge/` (`messenger_bridge`, same Cargo workspace) adapts this crate to
+  Flutter Rust Bridge; `messenger_core` itself has no FFI dependency.
 - `MessengerCore::new(homeserver_url, data_dir)` validates an `http(s)` homeserver
   URL (bare server names such as `matrix.org` are rejected: no `.well-known`
   discovery) and builds the single Matrix `Client` owned by that core instance.
@@ -20,7 +20,7 @@ integration and later be exposed to Flutter via Flutter Rust Bridge.
   room; `send_text_message(room_id, body)` sends one.
 - `start_sync()` / `stop_sync()` run a continuous sync that emits `CoreEvent`s
   (`subscribe_events()`).
-- **Not implemented yet:** Flutter Rust Bridge, media, invites.
+- **Not implemented yet:** product UI, media, invites.
 
 ```rust
 use messenger_core::{MessengerCore, RestoreOutcome};
@@ -164,10 +164,10 @@ rustup component add rustfmt clippy
 Run from this `rust/` directory:
 
 ```bash
-cargo check
-cargo test
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo check --workspace
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 The first build compiles the whole Matrix SDK dependency tree and takes a
