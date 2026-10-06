@@ -96,6 +96,9 @@ minutos. O homeserver é informado na tela de login (ex.: `matrix.org`;
 
 Build de distribuição: `flutter build macos --release` (ou `windows` / `linux`).
 
+No Linux, para o app aparecer no menu e no dock com o ícone, rode
+`linux/packaging/install-desktop-entry.sh` (dentro de `flutter/`) após o build release.
+
 Ícones do app (macOS, Windows, Linux) são gerados a partir dos SVGs em
 `flutter/tool/icon/` (direção B do design): `python3 tool/icon/generate.py`
 dentro de `flutter/` (requer Google Chrome e Pillow). Os arquivos gerados já

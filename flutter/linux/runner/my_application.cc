@@ -52,7 +52,9 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "Insight Lab");
   }
 
-  // Window icon, installed next to the executable (data/app_icon.png).
+  // Window icon, installed next to the executable (data/app_icon.png). Used
+  // on X11; Wayland desktops take it from the .desktop file instead
+  // (linux/packaging/install-desktop-entry.sh).
   g_autofree gchar* executable = g_file_read_link("/proc/self/exe", nullptr);
   if (executable != nullptr) {
     g_autofree gchar* directory = g_path_get_dirname(executable);
