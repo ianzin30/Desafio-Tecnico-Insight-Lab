@@ -5,10 +5,29 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:messenger_app/main.dart';
 import 'package:messenger_app/messenger_core.dart';
 
 import '../test/support/fake_homeserver.dart';
+
+/// Creates a client in a temporary directory and queries it without network.
+Future<String> bridgeSmokeCheck() async {
+  final dataDir = await Directory.systemTemp.createTemp('messenger_smoke');
+  try {
+    final api = await MessengerApi.create(
+      homeserverUrl: 'https://matrix.org',
+      dataDir: dataDir.path,
+    );
+    final restore = await api.restoreSession();
+    final status =
+        'messenger_core loaded: homeserver=${api.homeserver()} '
+        'user=${api.currentUser()} restore=${restore.name} '
+        'sync=${api.syncState().name}';
+    api.dispose();
+    return status;
+  } finally {
+    await dataDir.delete(recursive: true);
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

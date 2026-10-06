@@ -10,10 +10,12 @@ rust/                    workspace Cargo
 ├── src/                 messenger_core — engine Matrix (login, sessão, salas, mensagens, sync)
 └── bridge/              messenger_bridge — adaptador Flutter Rust Bridge (FFI), sem regra de negócio
 flutter/                 app Flutter desktop (messenger_app)
+├── lib/main.dart        composition root
+├── lib/app/             camada de aplicação (estado + intents, Riverpod)
 ├── lib/messenger_core.dart   API Dart da engine (exporta os bindings gerados)
 ├── lib/src/rust/        bindings GERADOS — não editar
 ├── hook/build.dart      build hook (Native Assets) que compila rust/bridge
-├── test/                testes da bridge na VM Dart
+├── test/                testes da bridge e da camada de aplicação (VM Dart)
 └── integration_test/    testes dentro do app desktop real
 ```
 
@@ -37,7 +39,7 @@ Arquivos gerados (`flutter_rust_bridge_codegen generate`, nunca editados à mão
 ```bash
 cd flutter
 flutter pub get
-flutter run -d macos   # ou windows / linux
+flutter run -d macos   # ou windows / linux (o homeserver é escolhido no login)
 ```
 
 O build hook compila `rust/bridge` (release) e empacota a biblioteca no app —

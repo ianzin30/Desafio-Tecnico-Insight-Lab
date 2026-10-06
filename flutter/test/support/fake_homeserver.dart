@@ -31,6 +31,11 @@ class FakeHomeserver {
   final Map<String?, FakeResponse> syncScript = {};
   final List<Map<String, dynamic>> sentMessages = [];
   List<Map<String, dynamic>> messagesChunk = [];
+
+  /// Per-room `/messages` chunks (newest first) and delays; rooms without
+  /// an entry use [messagesChunk] and answer immediately.
+  final Map<String, List<Map<String, dynamic>>> roomMessages = {};
+  final Map<String, Duration> messagesDelay = {};
   int requestCount = 0;
 
   String get url => 'http://127.0.0.1:${_server.port}';
@@ -40,9 +45,18 @@ class FakeHomeserver {
 
   Future<void> close() => _server.close(force: true);
 
+  /// Paths of the requests received, in order.
+  final requestPaths = <String>[];
+
+  /// Number of `/messages` requests for [roomId].
+  int messagesRequests(String roomId) => requestPaths
+      .where((path) => path == '/_matrix/client/v3/rooms/$roomId/messages')
+      .length;
+
   Future<void> _handle(HttpRequest request) async {
     requestCount++;
     final path = request.uri.path;
+    requestPaths.add(Uri.decodeComponent(path));
     final body = await utf8.decoder.bind(request).join();
     FakeResponse response;
 
@@ -72,7 +86,12 @@ class FakeHomeserver {
             'next_batch': since ?? 's0',
           }, delay: const Duration(milliseconds: 100));
     } else if (path.endsWith('/messages')) {
-      response = FakeResponse({'start': 't1', 'chunk': messagesChunk});
+      final segments = request.uri.pathSegments;
+      final roomId = segments[segments.length - 2];
+      response = FakeResponse({
+        'start': 't1',
+        'chunk': roomMessages[roomId] ?? messagesChunk,
+      }, delay: messagesDelay[roomId] ?? Duration.zero);
     } else if (path.contains('/send/m.room.message/')) {
       sentMessages.add(jsonDecode(body) as Map<String, dynamic>);
       response = const FakeResponse({r'event_id': r'$sent'});

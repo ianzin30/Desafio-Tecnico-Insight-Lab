@@ -1,8 +1,79 @@
 # messenger_app (Flutter)
 
-Desktop app shell over the `messenger_core` Rust engine. There is no product
-UI yet: `lib/main.dart` is a technical entrypoint that loads the Rust library
-and calls it once.
+Desktop app over the `messenger_core` Rust engine. There is no product UI
+yet: `lib/main.dart` is the composition root and only shows the app phase.
+
+## Application layer (`lib/app/`)
+
+The UI observes state and calls intents; it never calls the bridge.
+
+```text
+widgets (future) → MessengerController (Riverpod) → MessengerGateway → MessengerApi → Rust
+```
+
+- **Riverpod 3** (`flutter_riverpod`): dependency injection (the gateway
+  factory is overridden by `main.dart` and by tests), `select` so each widget
+  rebuilds only for its slice, and `ref.onDispose` for shutdown.
+- `messenger_gateway.dart` — `MessengerGateway`, a 1:1 interface over
+  `MessengerApi`; `RustMessengerGateway` implements it.
+- `messenger_state.dart` — immutable state: `AppPhase` (initializing /
+  unauthenticated / authenticated / fatalError), `AuthState`, `RoomsState`,
+  `ConversationState` (selected room), `ConnectionStatus` (offline /
+  connecting / online / reconnecting) and semantic failures (`AuthFailure`,
+  `RoomsFailure`, `ConversationFailure`, `AuthNotice`) instead of `ApiError`.
+- `messenger_controller.dart` — `MessengerController`, the single
+  coordinator: one engine and one event subscription for the app's life.
+- `providers.dart` — `messengerProvider` (state + intents) and slices:
+  `appPhaseProvider`, `authStateProvider`, `roomsStateProvider`,
+  `conversationStateProvider`, `connectionStatusProvider`.
+
+```dart
+final app = ref.read(messengerProvider.notifier);
+await app.login(homeserver: 'https://matrix.org', username: 'alice', password: password);
+await app.selectRoom(roomId);          // loads the latest 50 messages
+await app.sendMessage('Olá!');         // appears when the sync confirms it
+await app.logout();
+```
+
+Behavior:
+
+- **Homeserver** is chosen at login. After a successful login it is saved
+  (`last_homeserver` file in `getApplicationSupportDirectory()`, the URL
+  only) and exposed as `MessengerState.homeserver`; the engine's data lives in
+  `matrix/` next to it.
+- **Startup** (`main.dart`): no saved homeserver → unauthenticated, no engine
+  yet. Otherwise the engine is created for it, its event stream subscribed,
+  then the session restored: no session → unauthenticated; restored → cached
+  rooms, then sync → authenticated; an unusable stored session →
+  unauthenticated with `AuthNotice.sessionExpired`; an unusable saved
+  homeserver → unauthenticated; engine or storage failure → `fatalError`
+  (`retryStartup()`).
+- **Login** (only while logged out) → if the homeserver differs from the
+  engine's, the engine is replaced: the old one is disposed (closing its
+  stream) and the new one gets the single event subscription. Then
+  authenticated, rooms from the local store, `startSync`. After a fresh login
+  the rooms stay `loading` until the first sync. There is never more than one
+  engine nor one subscription.
+- **Logout** → `stopSync`, `logout`, state cleared. `LogoutOutcome.localOnly`
+  still logs out, with `AuthNotice.loggedOutLocallyOnly`.
+- **Session revoked** (event, or `SessionRevoked`/`NotAuthenticated` from any
+  call) → everything cleared, unauthenticated, `AuthNotice.sessionExpired`.
+- `RoomsChanged` → rooms reloaded from the engine's local state; a selected
+  room that disappeared closes the conversation.
+- `MessageReceived` → added to the selected room only, deduplicated by ID,
+  ordered by timestamp (oldest first); messages arriving during a load are
+  merged into its result.
+- `TimelineGap` of the selected room → its timeline is reloaded and replaced
+  (`reconciling`); gaps of other rooms cost nothing (opening a room loads
+  fresh messages). `EventsLost` → rooms and conversation reloaded.
+- Reloads are coalesced (one running, one queued). A late messages result
+  for a previous room is dropped (request counter); results of calls made
+  before a logout/revocation are dropped (session counter).
+- `Recovering` only changes `ConnectionStatus.reconnecting`: data is kept.
+- **Event stream (FRB 2.13):** subscribed once per engine and never cancelled
+  on its own while in use (a cancellation only completes on a later event).
+  When the engine is replaced or the app exits (`AppLifecycleListener`), the
+  engine is disposed first, which closes the stream, so nothing waits.
 
 ## Rust ↔ Dart bridge
 
@@ -78,7 +149,7 @@ api.dispose();                              // releases the core; closes the str
 ```bash
 (cd ../rust && cargo build -p messenger_bridge)   # library loaded by `flutter test`
 flutter analyze
-flutter test                              # Dart VM, real Rust library, local fake homeserver
+flutter test                              # bridge + application layer: real Rust library, local fake homeserver
 flutter test integration_test -d macos    # inside the real desktop app
 ```
 

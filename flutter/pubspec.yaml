@@ -9,11 +9,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # State management and dependency injection of the application layer.
+  flutter_riverpod: ^3.4.3
   # Pinned exactly: must match the Rust crate and the codegen version.
   flutter_rust_bridge: 2.13.0
   # Build hook compiling the Rust bridge crate (Native Assets).
   flutter_rust_bridge_hooks: 2.13.0
+  # Used by the generated bridge types (sealed classes).
   freezed_annotation: ^3.1.0
+  # Per-platform application data directory passed to the Rust core.
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
