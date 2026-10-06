@@ -1,4 +1,4 @@
-// Runs inside the real desktop app (`flutter test integration_test -d macos`):
+// Bridge smoke tests, run inside the real desktop app by app_test.dart:
 // the Rust library is the one bundled by the build hook, loaded by the
 // default loader.
 import 'dart:io';
@@ -32,7 +32,9 @@ Future<String> bridgeSmokeCheck() async {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(RustLib.init);
+  setUpAll(() async {
+    if (!RustLib.instance.initialized) await RustLib.init();
+  });
 
   test('the bundled Rust library answers', () async {
     expect(

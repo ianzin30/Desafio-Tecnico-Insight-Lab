@@ -1,4 +1,4 @@
-// Composition root: builds the application once. No product UI yet: the
+// Composition root: builds the application layer once and shows the UI.
 // screen only shows the application phase.
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
@@ -9,8 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app/homeserver_store.dart';
 import 'app/messenger_gateway.dart';
-import 'app/messenger_state.dart';
 import 'app/providers.dart';
+import 'ui/app.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,19 +51,4 @@ void main() {
       child: const MessengerApp(),
     ),
   );
-}
-
-/// Placeholder until the UI: shows the current application phase.
-class MessengerApp extends ConsumerWidget {
-  const MessengerApp({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final phase = ref.watch(appPhaseProvider);
-    final connection = ref.watch(connectionStatusProvider);
-    final text = phase == AppPhase.authenticated
-        ? '${phase.name} (${connection.name})'
-        : phase.name;
-    return Center(child: Text(text, textDirection: TextDirection.ltr));
-  }
 }

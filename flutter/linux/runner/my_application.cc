@@ -45,14 +45,19 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "messenger_app");
+    gtk_header_bar_set_title(header_bar, "Matrix Desktop");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "messenger_app");
+    gtk_window_set_title(window, "Matrix Desktop");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // Default 1280x800, minimum 720x480 (high-fidelity prototype).
+  gtk_window_set_default_size(window, 1280, 800);
+  GdkGeometry geometry = {};
+  geometry.min_width = 720;
+  geometry.min_height = 480;
+  gtk_window_set_geometry_hints(window, nullptr, &geometry, GDK_HINT_MIN_SIZE);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

@@ -1,7 +1,33 @@
 # messenger_app (Flutter)
 
-Desktop app over the `messenger_core` Rust engine. There is no product UI
-yet: `lib/main.dart` is the composition root and only shows the app phase.
+Desktop app over the `messenger_core` Rust engine: login, rooms, chat and
+realtime updates, implementing the high-fidelity prototype ("Grafite e
+cobalto"). `lib/main.dart` is the composition root.
+
+## UI (`lib/ui/`)
+
+Each screen is a *view* (plain widget fed with state values and callbacks,
+tested directly) plus a thin *page* connecting it to the application layer.
+
+- `app.dart` — theme (light/dark follows the system) and one screen per
+  `AppPhase`: "Abrindo…" (after 300 ms), login, chat, fatal error with retry,
+  and the "Sua sessão expirou" modal when the session ends while in use.
+- `login_page.dart` — server (`https://` prefix, hidden when a scheme is
+  typed), username, password; field errors (invalid address, wrong
+  credentials) with focus on the culprit; one alert for unreachable server
+  and network, one for unexpected errors (both with retry); expired-session
+  and local-only-logout notices. The username is prefilled after an expiry.
+- `chat_page.dart`, `sidebar.dart`, `timeline.dart`, `composer.dart` — rooms
+  split into Diretas/Grupos (alphabetical), account menu with confirmed
+  logout, room header, timeline grouped by sender (5 min) with day
+  separators, loading/empty/error states, "Atualizando conversa…" while
+  reconciling, "N novas mensagens" pill when reading above, connection banner
+  after 2 s offline ("Conectado" once back), removed-room notice, composer
+  (Enter sends, Shift+Enter new line, Esc leaves; drafts kept per room;
+  disabled offline; failed sends keep the text with a retry). Compact layout
+  under 960 px; minimum window 720×480.
+- `theme.dart` — design tokens; fonts IBM Plex Sans/Mono bundled in
+  `assets/fonts` (OFL), so the app needs no network for them.
 
 ## Application layer (`lib/app/`)
 
@@ -149,9 +175,17 @@ api.dispose();                              // releases the core; closes the str
 ```bash
 (cd ../rust && cargo build -p messenger_bridge)   # library loaded by `flutter test`
 flutter analyze
-flutter test                              # bridge + application layer: real Rust library, local fake homeserver
-flutter test integration_test -d macos    # inside the real desktop app
+flutter test                              # bridge, application layer, UI widgets
+flutter test integration_test -d macos    # real app: bridge smoke + UI end-to-end
 ```
+
+- `test/ui/` — widget tests of every screen state (built from state values),
+  formatting helpers; `visual_snapshot_test.dart` renders the screens to PNG
+  for visual review when `SNAPSHOT_DIR` is set (skipped otherwise).
+- `integration_test/app_e2e.dart` — the whole app driven through its UI with
+  the real Rust engine and a local fake homeserver: failed then successful
+  login, rooms, history, sending with Enter, realtime messages, logout with
+  confirmation, prefilled login, revoked session → expired modal → login.
 
 No test needs internet. Validated on **macOS (arm64)** only; Windows and Linux
 are configured (standard Flutter runners, native assets) but not built here.

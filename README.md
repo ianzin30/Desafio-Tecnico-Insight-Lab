@@ -12,11 +12,13 @@ rust/                    workspace Cargo
 flutter/                 app Flutter desktop (messenger_app)
 ├── lib/main.dart        composition root
 ├── lib/app/             camada de aplicação (estado + intents, Riverpod)
+├── lib/ui/              telas (alta fidelidade: login, salas, chat)
+├── assets/fonts/        IBM Plex Sans/Mono empacotadas (OFL)
 ├── lib/messenger_core.dart   API Dart da engine (exporta os bindings gerados)
 ├── lib/src/rust/        bindings GERADOS — não editar
 ├── hook/build.dart      build hook (Native Assets) que compila rust/bridge
-├── test/                testes da bridge e da camada de aplicação (VM Dart)
-└── integration_test/    testes dentro do app desktop real
+├── test/                testes da bridge, da camada de aplicação e da UI (VM Dart)
+└── integration_test/    dentro do app desktop real: smoke da bridge + E2E pela UI
 ```
 
 Arquivos gerados (`flutter_rust_bridge_codegen generate`, nunca editados à mão):
