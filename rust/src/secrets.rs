@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use crate::error::BoxError;
 
 /// Name under which the secrets appear in the credential store.
-const SERVICE: &str = "Matrix Desktop";
+const SERVICE: &str = "Insight Lab";
 
 /// Which secret store a core uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

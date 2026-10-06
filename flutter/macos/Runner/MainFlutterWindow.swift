@@ -9,7 +9,7 @@ class MainFlutterWindow: NSWindow {
     self.setContentSize(NSSize(width: 1280, height: 800))
     self.contentMinSize = NSSize(width: 720, height: 480)
     self.center()
-    self.title = "Matrix Desktop"
+    self.title = "Insight Lab"
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

@@ -45,11 +45,20 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "Matrix Desktop");
+    gtk_header_bar_set_title(header_bar, "Insight Lab");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "Matrix Desktop");
+    gtk_window_set_title(window, "Insight Lab");
+  }
+
+  // Window icon, installed next to the executable (data/app_icon.png).
+  g_autofree gchar* executable = g_file_read_link("/proc/self/exe", nullptr);
+  if (executable != nullptr) {
+    g_autofree gchar* directory = g_path_get_dirname(executable);
+    g_autofree gchar* icon =
+        g_build_filename(directory, "data", "app_icon.png", nullptr);
+    gtk_window_set_icon_from_file(window, icon, nullptr);
   }
 
   // Default 1280x800, minimum 720x480 (high-fidelity prototype).

@@ -315,18 +315,10 @@ class _Brand extends StatelessWidget {
     final c = AppColors.of(context);
     return Row(
       children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: c.accent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Icon(Icons.chat_bubble_outline, size: 17, color: c.accentInk),
-        ),
+        const _AppMark(size: 32),
         const SizedBox(width: 10),
         Text(
-          'Matrix Desktop',
+          'Insight Lab',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
@@ -336,6 +328,62 @@ class _Brand extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The app icon at small sizes: a solid bubble on the graphite plate (same
+/// geometry as `tool/icon/macos_solid.svg`, plate cropped).
+class _AppMark extends StatelessWidget {
+  const _AppMark({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 18 / 80),
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF2C313A), Color(0xFF121418)],
+        ),
+      ),
+      child: CustomPaint(painter: _BubblePainter()),
+    ),
+  );
+}
+
+class _BubblePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Icon units: the plate spans 10..90, the bubble 0..100 scaled by .58
+    // at 21,21.
+    final unit = size.width / 80;
+    canvas
+      ..scale(unit)
+      ..translate(11, 11)
+      ..scale(.58);
+    const r = Radius.circular(12);
+    final bubble = Path()
+      ..moveTo(30, 18)
+      ..lineTo(70, 18)
+      ..arcToPoint(const Offset(82, 30), radius: r)
+      ..lineTo(82, 56)
+      ..arcToPoint(const Offset(70, 68), radius: r)
+      ..lineTo(40, 68)
+      ..lineTo(27, 80)
+      ..lineTo(27, 67.4)
+      ..arcToPoint(const Offset(18, 56), radius: r)
+      ..lineTo(18, 30)
+      ..arcToPoint(const Offset(30, 18), radius: r)
+      ..close();
+    canvas.drawPath(bubble, Paint()..color = const Color(0xFFA9C0FA));
+  }
+
+  @override
+  bool shouldRepaint(_BubblePainter oldDelegate) => false;
 }
 
 /// Labelled input of the prototype (`.fld` / `.ig`).

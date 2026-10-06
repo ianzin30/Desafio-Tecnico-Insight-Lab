@@ -60,7 +60,7 @@ the core hardcodes no platform path. Layout:
 - **Secrets** (access/refresh tokens and the store's encryption key) are kept
   in the OS credential store — Keychain, Windows Credential Manager, Secret
   Service — through the `keyring` crate (`src/secrets.rs`), one entry per data
-  directory, service "Matrix Desktop". They never leave the Rust side.
+  directory, service "Insight Lab". They never leave the Rust side.
   `MessengerCore::with_secret_storage(.., SecretStorage::InMemory)` keeps them
   in process memory instead, for automated tests. **The password is never
   persisted.**

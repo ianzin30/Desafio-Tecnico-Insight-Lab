@@ -1,4 +1,4 @@
-# Matrix Desktop
+# Insight Lab
 
 Cliente desktop de mensageria [Matrix](https://matrix.org): Flutter na
 interface, Rust (Matrix Rust SDK) no núcleo, ligados pelo Flutter Rust Bridge.
@@ -45,9 +45,6 @@ Matrix Rust SDK                     protocolo, criptografia, store SQLite
 - **Estado de aplicação no Flutter:** fases do app, seleção de sala,
   timeline exibida e reconciliação são decisões de produto, testadas sem UI.
 
-Decisões e motivos: [docs/technical-decisions.md](docs/technical-decisions.md).
-Limitações conhecidas: [docs/known-limitations.md](docs/known-limitations.md).
-
 ## Estrutura
 
 ```text
@@ -63,7 +60,7 @@ flutter/                 app Flutter desktop (messenger_app)
 ├── assets/fonts/        IBM Plex Sans/Mono (OFL, licença incluída)
 ├── test/                testes Dart (VM): bridge, state layer, UI
 └── integration_test/    testes dentro do app desktop real (bridge + E2E pela UI)
-docs/                    decisões técnicas, limitações, capturas
+docs/screenshots/        capturas do app
 ```
 
 ## Pré-requisitos
@@ -98,6 +95,11 @@ minutos. O homeserver é informado na tela de login (ex.: `matrix.org`;
 `http://localhost:8008` para um servidor local).
 
 Build de distribuição: `flutter build macos --release` (ou `windows` / `linux`).
+
+Ícones do app (macOS, Windows, Linux) são gerados a partir dos SVGs em
+`flutter/tool/icon/` (direção B do design): `python3 tool/icon/generate.py`
+dentro de `flutter/` (requer Google Chrome e Pillow). Os arquivos gerados já
+estão versionados.
 
 Os bindings já estão versionados. Só é preciso regenerá-los ao mudar a API em
 `rust/bridge/src/api/`:
@@ -141,13 +143,5 @@ cargo test -p messenger_core system_secret_store -- --ignored
 MATRIX_HOMESERVER=https://matrix.org MATRIX_USERNAME=... MATRIX_PASSWORD=... \
   cargo test -p messenger_core --test live_login -- --ignored --nocapture
 ```
-
-## Plataformas validadas
-
-| | Status |
-|---|---|
-| macOS (arm64) | ✅ build debug e release, app com sandbox, Keychain, testes de integração e E2E |
-| Windows | ⚠️ configurado (runner, tamanho mínimo, Credential Manager), **não compilado nem executado** |
-| Linux | ⚠️ configurado (runner, tamanho mínimo, Secret Service), **não compilado nem executado** |
 
 Detalhes por camada: [rust/README.md](rust/README.md) e [flutter/README.md](flutter/README.md).
