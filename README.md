@@ -94,6 +94,9 @@ sem passos manuais. O primeiro build compila o Matrix SDK e leva alguns
 minutos. O homeserver é informado na tela de login (ex.: `matrix.org`;
 `http://localhost:8008` para um servidor local).
 
+Para testar, crie as salas no Element com a criptografia ponta a ponta **desativada**: o app não
+tem backup de chaves, então em salas criptografadas só aparecem mensagens posteriores ao login atual.
+
 Build de distribuição: `flutter build macos --release` (ou `windows` / `linux`).
 
 No Linux, para o app aparecer no menu e no dock com o ícone, rode
