@@ -14,7 +14,9 @@ publish = false
 
 [dependencies]
 # Default features: end-to-end encryption, SQLite stores and rustls TLS.
-matrix-sdk = "0.19.1"
+# SQLite is compiled in (bundled): Linux and Windows have no system library
+# to link against by default.
+matrix-sdk = { version = "0.19.1", features = ["bundled-sqlite"] }
 # Random key for the SDK's store encryption.
 getrandom = "0.2.17"
 # Session secrets in the OS credential store (Keychain, Credential Manager,
